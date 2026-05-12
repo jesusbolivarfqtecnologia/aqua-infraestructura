@@ -1,0 +1,1626 @@
+import React, { useState, useEffect, useReducer, createContext, useContext, useMemo, useCallback } from 'react';
+import { 
+  Menu, X, Droplet, Map as MapIcon, Layers, FolderGit2, 
+  Activity, ClipboardList, Plus, Edit2, Trash2, Save, 
+  AlertTriangle, Check, List, Grid, Eye, Clock, Search, Info,
+  UploadCloud, ChevronRight, ChevronLeft, Download, BarChart2, TrendingUp, AlertCircle, Maximize, Minimize
+} from 'lucide-react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, 
+  Tooltip as RechartsTooltip, Legend, ReferenceLine, ReferenceArea, 
+  ResponsiveContainer, Cell, ComposedChart, Line, Brush
+} from 'recharts';
+
+// --- ESTILOS GLOBALES Y FUENTES ---
+const fontStyles = `
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=Syne:wght@400;600;700;800&display=swap');
+  
+  :root {
+    --color-dark: #0A1628;
+    --color-blue: #1B3A6B;
+    --color-cyan: #00C2D4;
+    --color-bg: #F8FAFC;
+  }
+  
+  .font-heading { font-family: 'Syne', sans-serif; }
+  .font-body { font-family: 'DM Sans', sans-serif; }
+  
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+`;
+
+// --- 🗄️ MODELO DE DATOS Y TIPOS ---
+type ID = string;
+
+interface Proyecto { id: ID; nombre: string; }
+interface UnidadFuncional { id: ID; nombre: string; proyectoId: ID; }
+interface ConfiguracionTag { id: ID; tag: string; descripcion: string; tipo: 'bifurcado' | 'unico'; }
+type CarrilTag = string;
+interface Ruta { id: ID; nombre: string; unidadFuncionalId: ID; carrilesTags: CarrilTag[]; }
+interface Calzada { id: ID; nombre: 'Derecha' | 'Izquierda' | 'Única'; rutaId: ID; }
+interface Carril { id: ID; nombre: 'Derecho' | 'Izquierdo'; calzadaId: ID; }
+
+export const FRECUENCIAS = {
+  SEMANAL: { label: 'Semanal', dias: 7 }, QUINCENAL: { label: 'Quincenal', dias: 15 },
+  MENSUAL: { label: 'Mensual', dias: 30 }, BIMESTRAL: { label: 'Bimestral', dias: 60 },
+  TRIMESTRAL: { label: 'Trimestral', dias: 90 }, SEMESTRAL: { label: 'Semestral', dias: 180 },
+  ANUAL: { label: 'Anual', dias: 365 },
+} as const;
+
+export type FrecuenciaKey = keyof typeof FRECUENCIAS;
+export type OperadorCondicion = '<=' | '>=' | '<' | '>' | '==' | 'between';
+export type TipoCondicion = 'PUNTUAL' | 'MEDIO' | 'GENERAL';
+export type UnidadCorreccion = 'N/A' | 'HORAS' | 'MESES';
+
+export interface CondicionIndicador {
+  id: string; nombre: string; operador: OperadorCondicion; valor: number;
+  valor_max?: number; unidad: string; tipo: TipoCondicion;
+}
+
+export interface Indicador {
+  id: string; nombre: string; identificador: string; concepto_medicion: string;
+  normatividad: string; metodo_medida: string; frecuencia: FrecuenciaKey;
+  frecuencia_dias: number; unidad_medida: string; tiempo_correccion_valor: number | null;
+  tiempo_correccion_unidad: UnidadCorreccion; condiciones: CondicionIndicador[];
+  createdAt: string; updatedAt: string;
+}
+
+export interface IRI_RegistroBase {
+  from_m: number; to_m: number; iri_izq: number; iri_der: number; promedio: number;
+}
+export interface IRI_RegistroPuntual {
+  from_m: number; to_m: number; valor: number; cumple_puntual: boolean;
+}
+export interface IRI_ResumenKm {
+  km_label: string; from_m: number; to_m: number; valor_medio: number;
+  n_puntuales: number; n_incumplimientos: number; cumple_medio: boolean; cumple_km: boolean;
+}
+export interface IRI_Estadisticas {
+  total_registros_base: number; total_puntuales: number; valor_medio_global: number;
+  valor_max_puntual: number; valor_min_puntual: number; n_incumplimientos_puntual: number;
+  n_km_incumplen: number; porcentaje_cumplimiento: number; cumple_global: boolean;
+}
+export interface DatosIRI {
+  tipo: 'IRI'; version: '1.0'; unidad: string; intervalo_base_m: number; intervalo_puntual_m: number;
+  registros_base: IRI_RegistroBase[]; 
+  registros_puntual: IRI_RegistroPuntual[]; 
+  resumen_km: IRI_ResumenKm[]; 
+  estadisticas: IRI_Estadisticas;
+}
+export type DatosMedicion = DatosIRI;
+
+export interface Medicion {
+  id: string; proyectoId: string; unidadFuncionalId: string; rutaId: string;
+  carrilesSeleccionados: string[]; indicadorId: string; fecha: string;
+  datos: Omit<DatosMedicion, 'registros_base'>; 
+  tiene_datos_base?: boolean; 
+  createdAt: string; updatedAt: string;
+}
+
+// --- DATOS SEMILLA ---
+const SEED_INDICADOR_IRI: Indicador = {
+  id: 'ind_iri_001', nombre: "IRI", identificador: "E1", concepto_medicion: "Rugosidad Longitudinal",
+  normatividad: "INV E-790-13", metodo_medida: "Medición cada 100m en ambas huellas...",
+  frecuencia: "SEMESTRAL", frecuencia_dias: 180, unidad_medida: "m/km",
+  tiempo_correccion_valor: 3, tiempo_correccion_unidad: "MESES",
+  condiciones: [
+    { id: 'c1', nombre: "Valor puntual", operador: "<=", valor: 3.5, unidad: "m/km", tipo: "PUNTUAL" },
+    { id: 'c2', nombre: "Valor medio", operador: "<=", valor: 3.0, unidad: "m/km", tipo: "MEDIO" }
+  ],
+  createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+};
+
+// --- ⚙️ MOTOR INDEXED_DB (Para datos pesados) ---
+const DB_NAME = 'AquaInfraDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'mediciones_base';
+
+const getDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = (e: any) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+  });
+};
+
+const saveBaseRecords = async (id: string, records: any[]) => {
+  try {
+    const db = await getDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(records, id);
+    return new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = reject; });
+  } catch (e) { console.error("Error IndexedDB save", e); }
+};
+
+const getBaseRecords = async (id: string): Promise<any[]> => {
+  try {
+    const db = await getDB();
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(id);
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) { console.error("Error IndexedDB get", e); return []; }
+};
+
+const deleteBaseRecords = async (id: string) => {
+  try {
+    const db = await getDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).delete(id);
+  } catch (e) { console.error("Error IndexedDB delete", e); }
+};
+
+// --- 🔑 LÓGICA DE NEGOCIO Y PARSER ---
+const generateId = () => Math.random().toString(36).substring(2, 10);
+
+export function agruparPorKm(records: any[], isCrudo: boolean, condPuntual: number, condMedio: number) {
+  if (records.length === 0) return { stats: null, km: [] };
+  
+  let maxPuntual = -Infinity;
+  let fallosGlobales = 0; 
+  let sumMediaGlobal = 0; 
+  let kmFallidos = 0;
+  const combinedKm: IRI_ResumenKm[] = [];
+
+  let currentKmStart = records[0].from_m;
+  let currentKmEnd = currentKmStart + 1000;
+  let currentKmRecords: any[] = [];
+
+  const processKm = () => {
+    if (currentKmRecords.length > 0) {
+      let fallosKm = 0; let sumKm = 0;
+      currentKmRecords.forEach(r => {
+         let val = 0;
+         let isFallo = false;
+         if (isCrudo) {
+            val = Math.max(r.iri_izq, r.iri_der);
+            isFallo = r.iri_izq > condPuntual || r.iri_der > condPuntual;
+            sumKm += r.promedio;
+         } else {
+            val = r.valor;
+            isFallo = r.valor > condPuntual;
+            sumKm += r.valor;
+         }
+         if (val > maxPuntual) maxPuntual = val;
+         if (isFallo) fallosKm++;
+      });
+
+      const valor_medio = sumKm / currentKmRecords.length;
+      const cumple_medio = valor_medio <= condMedio;
+      const cumple_km = cumple_medio && fallosKm === 0;
+
+      fallosGlobales += fallosKm;
+      sumMediaGlobal += valor_medio;
+      if(!cumple_km) kmFallidos++;
+
+      const kf = Math.floor(currentKmStart / 1000);
+      const rf = String(Math.round(currentKmStart % 1000)).padStart(3, '0');
+      const kt = Math.floor(currentKmEnd / 1000);
+      const rt = String(Math.round(currentKmEnd % 1000)).padStart(3, '0');
+
+      combinedKm.push({
+         km_label: `K${kf}+${rf} - K${kt}+${rt}`,
+         from_m: currentKmStart,
+         to_m: currentKmEnd,
+         valor_medio,
+         n_puntuales: currentKmRecords.length,
+         n_incumplimientos: fallosKm,
+         cumple_medio,
+         cumple_km
+      });
+    }
+  };
+
+  for (let i = 0; i < records.length; i++) {
+    const r = records[i];
+    while (r.from_m >= currentKmEnd) {
+      processKm();
+      currentKmStart = currentKmEnd;
+      currentKmEnd += 1000;
+      currentKmRecords = [];
+    }
+    currentKmRecords.push(r);
+  }
+  processKm(); 
+
+  const stats: IRI_Estadisticas = {
+     total_registros_base: records.length, 
+     total_puntuales: records.length,
+     valor_medio_global: combinedKm.length ? sumMediaGlobal / combinedKm.length : 0,
+     valor_max_puntual: maxPuntual === -Infinity ? 0 : maxPuntual,
+     valor_min_puntual: 0, 
+     n_incumplimientos_puntual: fallosGlobales,
+     n_km_incumplen: kmFallidos,
+     porcentaje_cumplimiento: records.length ? ((records.length - fallosGlobales)/records.length)*100 : 0,
+     cumple_global: kmFallidos === 0
+  };
+
+  return { stats, km: combinedKm };
+}
+
+export function parsearArchivoIRI(
+  csvText: string,
+  condicionPuntual: number,
+  condicionMedio: number
+): DatosIRI {
+  const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length < 2) throw new Error("Archivo vacío o sin datos.");
+
+  const parseDistancia = (str: string): number => {
+    if (!str) return NaN;
+    const clean = str.trim().replace(/"/g, '');
+    const prMatch = clean.toUpperCase().match(/PR(\d+)\+(\d+)/);
+    if (prMatch) return parseInt(prMatch[1]) * 1000 + parseInt(prMatch[2]);
+    const kMatch = clean.toUpperCase().match(/K(\d+)\+(\d+)/);
+    if (kMatch) return parseInt(kMatch[1]) * 1000 + parseInt(kMatch[2]);
+    return parseFloat(clean.replace(/,/g, '.'));
+  };
+
+  const parseNum = (str: string): number => {
+    if (!str) return NaN;
+    return parseFloat(str.trim().replace(/"/g, '').replace(/,/g, '.'));
+  };
+
+  const splitCSV = (line: string): string[] => {
+    const result: string[] = [];
+    let inQuote = false;
+    let current = '';
+    for (const c of line) {
+      if (c === '"') { inQuote = !inQuote; }
+      else if ((c === ',' || c === ';' || c === '\t') && !inQuote) {
+        result.push(current.trim()); current = '';
+      } else { current += c; }
+    }
+    result.push(current.trim());
+    return result;
+  };
+
+  let dataStartIndex = 0;
+  let intervalo_base_m = 20; 
+
+  for (let i = 0; i < Math.min(10, lines.length); i++) {
+    const cols = splitCSV(lines[i]);
+    if (cols.length >= 5) {
+      const testFrom = parseDistancia(cols[0]);
+      const testIri = parseNum(cols[3]);
+      if (!isNaN(testFrom) && !isNaN(testIri)) {
+        dataStartIndex = i;
+        const parseDist = parseNum(cols[2]);
+        if (!isNaN(parseDist) && parseDist > 0) intervalo_base_m = parseDist;
+        break;
+      }
+    }
+  }
+
+  const registros_base: IRI_RegistroBase[] = [];
+  for (let i = dataStartIndex; i < lines.length; i++) {
+    const cols = splitCSV(lines[i]);
+    if (cols.length < 5) continue;
+
+    const from_m  = parseDistancia(cols[0]);
+    const to_m    = parseDistancia(cols[1]);
+    const iri_izq = parseNum(cols[3]);
+    const iri_der = parseNum(cols[4]);
+
+    if (isNaN(from_m) || isNaN(to_m) || isNaN(iri_izq) || isNaN(iri_der)) continue;
+
+    const promedio = (iri_izq + iri_der) / 2;
+    registros_base.push({ from_m, to_m, iri_izq, iri_der, promedio });
+  }
+
+  if (registros_base.length === 0) throw new Error("No se encontraron datos válidos. Verifica las columnas.");
+
+  const pointsPer100m = Math.max(1, Math.round(100 / intervalo_base_m));
+  const registros_puntual: IRI_RegistroPuntual[] = [];
+  
+  for (let i = 0; i < registros_base.length; i += pointsPer100m) {
+    const chunk = registros_base.slice(i, i + pointsPer100m);
+    if (chunk.length === 0) continue;
+    const valor = chunk.reduce((acc, r) => acc + r.promedio, 0) / chunk.length;
+    registros_puntual.push({
+      from_m: chunk[0].from_m,
+      to_m:   chunk[chunk.length - 1].to_m,
+      valor,
+      cumple_puntual: valor <= condicionPuntual
+    });
+  }
+
+  const { stats, km } = agruparPorKm(registros_puntual, false, condicionPuntual, condicionMedio);
+  if (stats) stats.total_registros_base = registros_base.length;
+
+  return {
+    tipo: 'IRI', version: '1.0', unidad: 'm/km', intervalo_base_m, intervalo_puntual_m: 100,
+    registros_base, registros_puntual, 
+    resumen_km: km || [], 
+    estadisticas: stats || {
+       total_registros_base: 0, total_puntuales: 0, valor_medio_global: 0,
+       valor_max_puntual: 0, valor_min_puntual: 0, n_incumplimientos_puntual: 0,
+       n_km_incumplen: 0, porcentaje_cumplimiento: 0, cumple_global: true
+    }
+  };
+}
+
+const descargarTemplatIRI = () => {
+  const header = 'From (m),To (m),Distance (m),"IRI, Left (mm/m)","IRI, Right (mm/m)"';
+  const ejemplos = [
+    'PR02+080,PR02+100,20,2.24,2.39',
+    'PR02+100,PR02+120,20,3.44,2.98',
+    'PR02+120,PR02+140,20,2.02,2.16',
+    'PR02+140,PR02+160,20,2.21,2.10',
+    'PR02+160,PR02+180,20,2.87,2.79',
+  ].join('\n');
+  const blob = new Blob([header + '\n' + ejemplos], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  a.download = 'plantilla_IRI.csv'; a.click();
+  URL.revokeObjectURL(url);
+};
+
+// --- ESTADO GLOBAL ---
+interface AppState {
+  activeModule: string; activeProjectId: ID | null;
+  proyectos: Proyecto[]; unidadesFuncionales: UnidadFuncional[];
+  configuracionTags: ConfiguracionTag[]; rutas: Ruta[];
+  indicadores: Indicador[]; mediciones: Medicion[];
+}
+
+type Action = 
+  | { type: 'SET_MODULE'; payload: string }
+  | { type: 'SET_ACTIVE_PROJECT'; payload: ID | null }
+  | { type: 'ADD_PROYECTO'; payload: Proyecto }
+  | { type: 'UPDATE_PROYECTO'; payload: Proyecto }
+  | { type: 'DELETE_PROYECTO'; payload: ID }
+  | { type: 'ADD_TAG'; payload: ConfiguracionTag }
+  | { type: 'UPDATE_TAG'; payload: ConfiguracionTag }
+  | { type: 'DELETE_TAG'; payload: ID }
+  | { type: 'ADD_UF'; payload: UnidadFuncional }
+  | { type: 'UPDATE_UF'; payload: UnidadFuncional }
+  | { type: 'DELETE_UF'; payload: ID }
+  | { type: 'SAVE_RUTAS_BATCH'; payload: { ufId: ID; rutas: Ruta[] } }
+  | { type: 'ADD_INDICADOR'; payload: Omit<Indicador, 'id' | 'createdAt' | 'updatedAt' | 'frecuencia_dias'> }
+  | { type: 'UPDATE_INDICADOR'; payload: Indicador }
+  | { type: 'DELETE_INDICADOR'; payload: ID }
+  | { type: 'ADD_MEDICION'; payload: Medicion }
+  | { type: 'DELETE_MEDICION'; payload: ID };
+
+const initialState: AppState = {
+  activeModule: 'proyectos', activeProjectId: null,
+  proyectos: [{ id: 'p1', nombre: 'Concesión Ruta del Sol' }],
+  unidadesFuncionales: [{ id: 'uf1', nombre: 'UF 1 - Tramo Inicial', proyectoId: 'p1' }],
+  configuracionTags: [
+    { id: 't1', tag: 'DD', descripcion: 'Calzada Derecha - Carril Derecho', tipo: 'bifurcado' },
+    { id: 't2', tag: 'DI', descripcion: 'Calzada Derecha - Carril Izquierdo', tipo: 'bifurcado' },
+    { id: 't3', tag: 'ID', descripcion: 'Calzada Izquierda - Carril Derecho', tipo: 'bifurcado' },
+    { id: 't4', tag: 'II', descripcion: 'Calzada Izquierda - Carril Izquierdo', tipo: 'bifurcado' },
+    { id: 't5', tag: 'D', descripcion: 'Calzada Única - Carril Derecho', tipo: 'unico' },
+    { id: 't6', tag: 'I', descripcion: 'Calzada Única - Carril Izquierdo', tipo: 'unico' },
+  ],
+  rutas: [{ id: 'r1', nombre: 'Ruta 45', unidadFuncionalId: 'uf1', carrilesTags: ['DD', 'DI'] }],
+  indicadores: [SEED_INDICADOR_IRI], mediciones: [] // Eliminado el Fricción de la carga por defecto.
+};
+
+const appReducer = (state: AppState, action: Action): AppState => {
+  switch (action.type) {
+    case 'SET_MODULE': return { ...state, activeModule: action.payload };
+    case 'SET_ACTIVE_PROJECT': return { ...state, activeProjectId: action.payload };
+    case 'ADD_PROYECTO': return { ...state, proyectos: [...state.proyectos, action.payload] };
+    case 'UPDATE_PROYECTO': return { ...state, proyectos: state.proyectos.map(p => p.id === action.payload.id ? action.payload : p) };
+    case 'DELETE_PROYECTO': return { ...state, proyectos: state.proyectos.filter(p => p.id !== action.payload), activeProjectId: state.activeProjectId === action.payload ? null : state.activeProjectId };
+    case 'ADD_TAG': return { ...state, configuracionTags: [...state.configuracionTags, action.payload] };
+    case 'UPDATE_TAG': return { ...state, configuracionTags: state.configuracionTags.map(t => t.id === action.payload.id ? action.payload : t) };
+    case 'DELETE_TAG': return { ...state, configuracionTags: state.configuracionTags.filter(t => t.id !== action.payload) };
+    case 'ADD_UF': return { ...state, unidadesFuncionales: [...state.unidadesFuncionales, action.payload] };
+    case 'UPDATE_UF': return { ...state, unidadesFuncionales: state.unidadesFuncionales.map(u => u.id === action.payload.id ? action.payload : u) };
+    case 'DELETE_UF': return { ...state, unidadesFuncionales: state.unidadesFuncionales.filter(u => u.id !== action.payload) };
+    case 'SAVE_RUTAS_BATCH': return { ...state, rutas: [...state.rutas.filter(r => r.unidadFuncionalId !== action.payload.ufId), ...action.payload.rutas] };
+    case 'ADD_INDICADOR': return { ...state, indicadores: [...state.indicadores, { ...action.payload, id: `ind_${generateId()}`, frecuencia_dias: FRECUENCIAS[action.payload.frecuencia].dias, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as Indicador] };
+    case 'UPDATE_INDICADOR': return { ...state, indicadores: state.indicadores.map(i => i.id === action.payload.id ? {...action.payload, updatedAt: new Date().toISOString()} : i) };
+    case 'DELETE_INDICADOR': return { ...state, indicadores: state.indicadores.filter(i => i.id !== action.payload) };
+    case 'ADD_MEDICION': return { ...state, mediciones: [action.payload, ...state.mediciones] };
+    case 'DELETE_MEDICION': { deleteBaseRecords(action.payload); return { ...state, mediciones: state.mediciones.filter(m => m.id !== action.payload) }; }
+    default: return state;
+  }
+};
+
+const AppContext = createContext<{ state: AppState; dispatch: React.Dispatch<Action>; changeView: (view: string, props?: any) => void; viewProps: any } | undefined>(undefined);
+const useAppStore = () => { const context = useContext(AppContext); if (!context) throw new Error("useAppStore err"); return context; };
+
+// --- 🧩 UI COMPONENTS ---
+const Button = ({ children, variant = 'primary', size = 'default', className = '', ...props }: any) => {
+  const base = "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none disabled:opacity-50 disabled:pointer-events-none";
+  const variants = {
+    primary: "bg-[#00C2D4] text-[#0A1628] hover:bg-[#00A1B0] font-bold shadow-sm",
+    secondary: "bg-[#1B3A6B] text-white hover:bg-[#1B3A6B]/90 shadow-sm",
+    outline: "border border-slate-300 bg-white hover:bg-slate-50 text-slate-700",
+    ghost: "bg-transparent hover:bg-slate-100 text-slate-700",
+    danger: "bg-red-500 text-white hover:bg-red-600",
+  };
+  const sizes = { default: "h-10 py-2 px-4", sm: "h-8 px-3 text-xs", icon: "h-9 w-9" };
+  return <button className={`${base} ${variants[variant as keyof typeof variants]} ${sizes[size as keyof typeof sizes]} ${className}`} {...props}>{children}</button>;
+};
+const Input = ({ className = '', ...props }: any) => <input className={`flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00C2D4] disabled:opacity-50 ${className}`} {...props} />;
+const Textarea = ({ className = '', ...props }: any) => <textarea className={`flex w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00C2D4] disabled:opacity-50 ${className}`} {...props} />;
+const Select = ({ className = '', children, ...props }: any) => <select className={`flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00C2D4] disabled:opacity-50 ${className}`} {...props}>{children}</select>;
+const Card = ({ children, className = '' }: any) => <div className={`rounded-xl border border-slate-200 bg-white text-slate-950 shadow-sm transition-all duration-300 ${className}`}>{children}</div>;
+const Badge = ({ children, variant = 'default', className = '' }: any) => {
+  const variants = {
+    default: "bg-slate-100 text-slate-800", blue: "bg-blue-100 text-blue-800", green: "bg-emerald-100 text-emerald-800", 
+    purple: "bg-purple-100 text-purple-800", amber: "bg-amber-100 text-amber-800", red: "bg-red-100 text-red-800",
+    cyan: "bg-[#00C2D4]/20 text-[#0A1628] font-bold border border-[#00C2D4]/40",
+  };
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${variants[variant as keyof typeof variants]} ${className}`}>{children}</span>;
+};
+
+const InfoBanner = ({ title, children }: { title: string, children: React.ReactNode }) => (
+  <div className="bg-blue-50/50 p-4 rounded-lg border border-blue-100 text-sm text-slate-700 mb-6 flex items-start gap-3 shadow-sm">
+    <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+    <div>
+      <h4 className="font-bold text-[#1B3A6B] mb-1">{title}</h4>
+      <div className="leading-relaxed opacity-90">{children}</div>
+    </div>
+  </div>
+);
+
+const InlineEdit = ({ value, onSave }: { value: string, onSave: (val: string) => void }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [tempValue, setTempValue] = useState(value);
+  const handleSave = () => { if (tempValue.trim() !== '') { onSave(tempValue); } else { setTempValue(value); } setIsEditing(false); };
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-2">
+        <Input autoFocus value={tempValue} onChange={(e: any) => setTempValue(e.target.value)} className="h-8 text-sm w-full" onKeyDown={(e: any) => e.key === 'Enter' && handleSave()} />
+        <Button variant="primary" size="icon" className="h-8 w-8 shrink-0" onClick={handleSave}><Check className="w-4 h-4" /></Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between group cursor-pointer" onClick={() => setIsEditing(true)}>
+      <span className="truncate">{value}</span>
+      <Edit2 className="w-4 h-4 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+    </div>
+  );
+};
+
+const TagMultiSelect = ({ value, onChange, disabled = false, options }: { value: string[], onChange: (val: string[]) => void, disabled?: boolean, options: ConfiguracionTag[] }) => {
+  const handleToggle = (tagObj: ConfiguracionTag) => {
+    if (disabled) return;
+    let newValue = [...value];
+    if (newValue.includes(tagObj.tag)) { newValue = newValue.filter(t => t !== tagObj.tag); } 
+    else {
+      if (tagObj.tipo === 'bifurcado') { const unicos = options.filter(o => o.tipo === 'unico').map(o => o.tag); newValue = newValue.filter(t => !unicos.includes(t)); } 
+      else if (tagObj.tipo === 'unico') { const bifurcados = options.filter(o => o.tipo === 'bifurcado').map(o => o.tag); newValue = newValue.filter(t => !bifurcados.includes(t)); }
+      newValue.push(tagObj.tag);
+    }
+    onChange(newValue);
+  };
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map(opt => {
+        const isSelected = value.includes(opt.tag);
+        const hasUnico = value.some(t => options.find(o => o.tag === t)?.tipo === 'unico');
+        const hasBifurcado = value.some(t => options.find(o => o.tag === t)?.tipo === 'bifurcado');
+        let isDisabledOption = disabled;
+        if (!isSelected && !disabled) {
+           if (opt.tipo === 'bifurcado' && hasUnico) isDisabledOption = true;
+           if (opt.tipo === 'unico' && hasBifurcado) isDisabledOption = true;
+        }
+        return (
+          <button key={opt.id} type="button" onClick={() => handleToggle(opt)} disabled={isDisabledOption} title={opt.descripcion}
+            className={`px-2 py-1 text-xs font-bold rounded border transition-all ${isSelected ? 'bg-[#FFF3CD] border-[#FFE69C] text-[#664D03] shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'} ${isDisabledOption ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+            {opt.tag}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+const SlidePanel = ({ isOpen, onClose, title, customWidth = "sm:w-[500px] lg:w-[600px]", children }: any) => {
+  return (
+    <>
+      {isOpen && <div className="fixed inset-0 bg-slate-900/30 z-40 backdrop-blur-sm" onClick={onClose} />}
+      <div className={`fixed top-0 right-0 h-full w-full ${customWidth} bg-white shadow-2xl z-50 border-l border-slate-200 transform transition-transform duration-300 flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50 shrink-0">
+          <h2 className="font-heading text-lg font-bold text-[#0A1628]">{title}</h2>
+          <Button variant="ghost" size="icon" onClick={onClose}><X className="w-5 h-5" /></Button>
+        </div>
+        <div className="flex-1 overflow-y-auto bg-slate-50/50 relative">{children}</div>
+      </div>
+    </>
+  );
+};
+
+const ConfirmDialog = ({ isOpen, onClose, onConfirm, title, message }: any) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <Card className="w-full max-w-md p-6 animate-in zoom-in-95 duration-200">
+        <div className="flex items-center gap-3 text-red-500 mb-4"><AlertTriangle className="w-6 h-6" /><h3 className="font-heading text-lg font-bold text-slate-900">{title}</h3></div>
+        <p className="text-sm text-slate-600 mb-6">{message}</p>
+        <div className="flex justify-end gap-3">
+          <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button variant="danger" onClick={() => { onConfirm(); onClose(); }}>Confirmar</Button>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// --- 📂 MÓDULO PROYECTOS ---
+const ProyectosView = () => {
+  const { state, dispatch, changeView } = useAppStore();
+  const [nuevoNombre, setNuevoNombre] = useState('');
+
+  const handleAdd = () => {
+    if (!nuevoNombre.trim()) return;
+    dispatch({ type: 'ADD_PROYECTO', payload: { id: generateId(), nombre: nuevoNombre } });
+    setNuevoNombre('');
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div className="flex justify-between items-center">
+        <div><h1 className="text-2xl font-heading font-bold text-[#0A1628]">Proyectos</h1><p className="text-slate-500 text-sm">Gestión de concesiones viales principales.</p></div>
+      </div>
+      
+      <InfoBanner title="¿Qué es un Proyecto?">
+        Un proyecto representa el contrato principal o la concesión vial general. Sirve como el contenedor de más alto nivel donde se agruparán las Unidades Funcionales (UF) y, posteriormente, las rutas a evaluar. Agrega proyectos para separar las métricas por concesión.
+      </InfoBanner>
+
+      <Card className="p-4 bg-white">
+        <div className="flex gap-4 mb-6">
+          <Input placeholder="Nombre del nuevo proyecto..." value={nuevoNombre} onChange={(e: any) => setNuevoNombre(e.target.value)} onKeyDown={(e: any) => e.key === 'Enter' && handleAdd()} />
+          <Button onClick={handleAdd}><Plus className="w-4 h-4 mr-2" /> Añadir Proyecto</Button>
+        </div>
+        <div className="border rounded-md overflow-hidden">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-slate-50 text-slate-600 font-semibold border-b">
+              <tr><th className="px-4 py-3 w-16">ID</th><th className="px-4 py-3">Nombre del Proyecto</th><th className="px-4 py-3 text-right">Acciones</th></tr>
+            </thead>
+            <tbody className="divide-y">
+              {state.proyectos.map(p => (
+                <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-4 py-3 text-slate-400 font-mono">{p.id}</td>
+                  <td className="px-4 py-3 font-medium text-slate-800"><InlineEdit value={p.nombre} onSave={(val) => dispatch({type: 'UPDATE_PROYECTO', payload: { ...p, nombre: val }})} /></td>
+                  <td className="px-4 py-3 text-right space-x-2">
+                    <Button variant="primary" size="sm" onClick={() => { dispatch({ type: 'SET_ACTIVE_PROJECT', payload: p.id }); changeView('rutas'); }}>
+                      <MapIcon className="w-4 h-4 mr-2" /> Entrar
+                    </Button>
+                    <Button variant="ghost" size="icon" className="text-red-500 hover:bg-red-50" onClick={() => dispatch({ type: 'DELETE_PROYECTO', payload: p.id })}><Trash2 className="w-4 h-4" /></Button>
+                  </td>
+                </tr>
+              ))}
+              {state.proyectos.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-500">No hay proyectos registrados.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// --- 🛣️ MÓDULO UNIDADES & RUTAS ---
+const UnidadesRutasView = () => {
+  const { state, dispatch } = useAppStore();
+  const activeProject = state.proyectos.find(p => p.id === state.activeProjectId);
+  const [nuevaUfNombre, setNuevaUfNombre] = useState('');
+  const [activeUfId, setActiveUfId] = useState<ID | null>(null);
+  const [localRutas, setLocalRutas] = useState<Ruta[]>([]);
+  const [nuevaRutaNombre, setNuevaRutaNombre] = useState('');
+
+  const ufs = useMemo(() => state.unidadesFuncionales.filter(u => u.proyectoId === state.activeProjectId), [state.unidadesFuncionales, state.activeProjectId]);
+
+  useEffect(() => { if (activeUfId) setLocalRutas(state.rutas.filter(r => r.unidadFuncionalId === activeUfId)); }, [activeUfId, state.rutas]);
+
+  const handleAddUF = () => { if (!nuevaUfNombre.trim() || !state.activeProjectId) return; dispatch({ type: 'ADD_UF', payload: { id: generateId(), nombre: nuevaUfNombre, proyectoId: state.activeProjectId } }); setNuevaUfNombre(''); };
+  const handleAddRutaLocal = () => { if (!nuevaRutaNombre.trim() || !activeUfId) return; setLocalRutas([...localRutas, { id: `tmp-${generateId()}`, nombre: nuevaRutaNombre, unidadFuncionalId: activeUfId, carrilesTags: [] }]); setNuevaRutaNombre(''); };
+  const handleSaveRutasBatch = () => { if (!activeUfId) return; dispatch({ type: 'SAVE_RUTAS_BATCH', payload: { ufId: activeUfId, rutas: localRutas } }); setActiveUfId(null); };
+
+  if (!state.activeProjectId) return (
+    <div className="flex flex-col items-center justify-center h-64 text-slate-500"><AlertTriangle className="w-12 h-12 mb-4 text-slate-300" /><h2 className="text-xl font-heading">Ningún proyecto seleccionado</h2><p className="mt-2">Por favor, selecciona o crea un proyecto en el módulo de Proyectos.</p></div>
+  );
+
+  return (
+    <div className="h-full flex flex-col relative animate-in fade-in">
+      <div className="mb-6 shrink-0"><h1 className="text-2xl font-heading font-bold text-[#0A1628]">Unidades Funcionales & Rutas</h1><p className="text-slate-500 text-sm">Proyecto actual: <strong className="text-[#1B3A6B]">{activeProject?.nombre}</strong></p></div>
+      
+      <InfoBanner title="Jerarquía de Infraestructura">
+        <ul className="list-disc list-inside space-y-1 mt-1">
+          <li><strong>Unidad Funcional (UF):</strong> Es una porción mayor del proyecto, un tramo que se entrega y evalúa de forma independiente (Ej. "UF 1 - Variante").</li>
+          <li><strong>Rutas:</strong> Dentro de cada UF, defines las rutas específicas (Ej. "Ruta 4517"). A cada ruta debes asignarle los <strong>Carriles</strong> que la componen (Ej. DD, DI) usando las etiquetas que previamente definiste en "Plantillas Calzadas".</li>
+        </ul>
+      </InfoBanner>
+
+      <div className="flex-1 overflow-hidden flex flex-col">
+        <Card className="flex-1 flex flex-col border-t-4 border-t-[#1B3A6B]">
+          <div className="p-4 border-b bg-slate-50/80 flex items-center gap-4 shrink-0">
+             <div className="flex-1 relative"><Layers className="w-5 h-5 absolute left-3 top-2.5 text-slate-400" /><Input placeholder="Nombre de la nueva Unidad Funcional..." className="pl-10" value={nuevaUfNombre} onChange={(e: any) => setNuevaUfNombre(e.target.value)} onKeyDown={(e: any) => e.key === 'Enter' && handleAddUF()} /></div>
+             <Button onClick={handleAddUF} className="shrink-0"><Plus className="w-4 h-4 mr-2" /> Añadir UF</Button>
+          </div>
+          <div className="flex-1 overflow-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-white sticky top-0 shadow-sm z-10 text-slate-600 font-semibold border-b"><tr><th className="px-6 py-3">Nombre Unidad Funcional</th><th className="px-6 py-3 text-right">Opciones</th></tr></thead>
+              <tbody className="divide-y">
+                {ufs.map(uf => (
+                  <tr key={uf.id} className={`hover:bg-slate-50 transition-colors ${activeUfId === uf.id ? 'bg-blue-50/50' : ''}`}>
+                    <td className="px-6 py-4 font-medium text-[#1B3A6B]"><InlineEdit value={uf.nombre} onSave={(val) => dispatch({type: 'UPDATE_UF', payload: { ...uf, nombre: val }})} /></td>
+                    <td className="px-6 py-4 text-right space-x-2 flex justify-end items-center">
+                      <Button variant="secondary" size="sm" className="bg-[#0A1628] hover:bg-[#1B3A6B]" onClick={() => setActiveUfId(uf.id)}><MapIcon className="w-4 h-4 mr-2 text-[#00C2D4]" /> Rutas</Button>
+                      <Button variant="ghost" size="icon" className="text-red-500" onClick={() => dispatch({type: 'DELETE_UF', payload: uf.id})}><Trash2 className="w-4 h-4" /></Button>
+                    </td>
+                  </tr>
+                ))}
+                {ufs.length === 0 && <tr><td colSpan={2} className="px-6 py-12 text-center text-slate-500">Añade la primera Unidad Funcional para comenzar.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+
+      <SlidePanel isOpen={activeUfId !== null} onClose={() => setActiveUfId(null)} title={<span>Rutas de <strong className="text-[#1B3A6B]">{ufs.find(u=>u.id===activeUfId)?.nombre}</strong></span>}>
+        <div className="flex flex-col h-full space-y-4 p-4">
+          <div className="flex gap-2 shrink-0"><Input placeholder="Nombre de nueva ruta..." value={nuevaRutaNombre} onChange={(e: any) => setNuevaRutaNombre(e.target.value)} onKeyDown={(e: any) => e.key === 'Enter' && handleAddRutaLocal()} /><Button onClick={handleAddRutaLocal}>Añadir</Button></div>
+          <div className="border rounded-md overflow-hidden bg-white flex-1 flex flex-col shadow-sm">
+            <div className="overflow-x-auto flex-1">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-slate-50 text-slate-600 font-semibold border-b"><tr><th className="px-4 py-3 min-w-[120px]">Ruta</th><th className="px-4 py-3 min-w-[200px]">Carril</th><th className="px-4 py-3 text-right w-[80px]">Opciones</th></tr></thead>
+                <tbody className="divide-y">
+                  {localRutas.map(ruta => (
+                    <tr key={ruta.id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-medium text-slate-800 align-top"><InlineEdit value={ruta.nombre} onSave={(val) => setLocalRutas(prev => prev.map(r => r.id === ruta.id ? { ...r, nombre: val } : r))} /></td>
+                      <td className="px-4 py-3 align-top"><TagMultiSelect value={ruta.carrilesTags} options={state.configuracionTags} onChange={(tags) => setLocalRutas(prev => prev.map(r => r.id === ruta.id ? { ...r, carrilesTags: tags } : r))} /></td>
+                      <td className="px-4 py-3 text-right align-top"><Button variant="ghost" size="icon" className="text-red-500 h-6 w-6" onClick={() => setLocalRutas(prev => prev.filter(r => r.id !== ruta.id))}><Trash2 className="w-4 h-4" /></Button></td>
+                    </tr>
+                  ))}
+                  {localRutas.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-500">No hay rutas configuradas.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <div className="p-4 bg-slate-50 border-t flex justify-end shrink-0"><Button onClick={handleSaveRutasBatch}><Save className="w-4 h-4 mr-2" /> Guardar Todo</Button></div>
+          </div>
+        </div>
+      </SlidePanel>
+    </div>
+  );
+};
+
+// --- 🏷️ MÓDULO PLANTILLAS CALZADAS ---
+const PlantillasCalzadasView = () => {
+  const { state, dispatch } = useAppStore();
+  const [nuevoTag, setNuevoTag] = useState('');
+  const [nuevaDesc, setNuevaDesc] = useState('');
+  const [nuevoTipo, setNuevoTipo] = useState<'bifurcado' | 'unico'>('bifurcado');
+
+  const handleAdd = () => {
+    if (!nuevoTag.trim() || !nuevaDesc.trim()) return;
+    dispatch({ type: 'ADD_TAG', payload: { id: generateId(), tag: nuevoTag.toUpperCase(), descripcion: nuevaDesc, tipo: nuevoTipo } });
+    setNuevoTag(''); setNuevaDesc('');
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div><h1 className="text-2xl font-heading font-bold text-[#0A1628]">Plantillas de Carriles</h1><p className="text-slate-500 text-sm">Configuración maestra de los tags de carriles.</p></div>
+      
+      <InfoBanner title="Diccionario de Carriles">
+        Aquí defines el "catálogo" de carriles que podrán ser asignados a las rutas. 
+        Por ejemplo, el Acrónimo <strong>"DD"</strong> puede significar "Calzada Derecha - Carril Derecho".
+        Si configuras una regla como <strong>"Único"</strong> (para vías de una sola calzada), el sistema no permitirá mezclarlo con etiquetas de vías "Bifurcadas" en la misma ruta, evitando errores de consistencia en el diseño de la vía.
+      </InfoBanner>
+
+      <Card className="p-4 bg-white">
+        <div className="flex flex-wrap items-end gap-4 mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+          <div className="flex-1 min-w-[150px]"><label className="text-xs font-semibold text-slate-500 mb-1 block">Acrónimo</label><Input placeholder="Ej: CDD" value={nuevoTag} onChange={(e: any) => setNuevoTag(e.target.value)} /></div>
+          <div className="flex-[2] min-w-[200px]"><label className="text-xs font-semibold text-slate-500 mb-1 block">Descripción</label><Input placeholder="Ej: Calzada Derecha - Carril Derecho" value={nuevaDesc} onChange={(e: any) => setNuevaDesc(e.target.value)} onKeyDown={(e: any) => e.key === 'Enter' && handleAdd()} /></div>
+          <div className="flex-1 min-w-[150px]"><label className="text-xs font-semibold text-slate-500 mb-1 block">Regla</label><Select value={nuevoTipo} onChange={(e: any) => setNuevoTipo(e.target.value)}><option value="bifurcado">Bifurcado (Múltiples calzadas)</option><option value="unico">Único (Calzada sencilla)</option></Select></div>
+          <Button onClick={handleAdd}><Plus className="w-4 h-4 mr-2" /> Añadir Carril</Button>
+        </div>
+        <div className="border rounded-md overflow-hidden">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-slate-50 text-slate-600 font-semibold border-b"><tr><th className="px-4 py-3 w-32">Tag</th><th className="px-4 py-3">Descripción</th><th className="px-4 py-3 w-40">Tipo</th><th className="px-4 py-3 text-right w-24">Acciones</th></tr></thead>
+            <tbody className="divide-y">
+              {state.configuracionTags.map(tag => (
+                <tr key={tag.id} className="hover:bg-slate-50/50">
+                  <td className="px-4 py-3 font-bold text-[#1B3A6B]"><InlineEdit value={tag.tag} onSave={(val) => dispatch({type: 'UPDATE_TAG', payload: { ...tag, tag: val.toUpperCase() }})} /></td>
+                  <td className="px-4 py-3 text-slate-700"><InlineEdit value={tag.descripcion} onSave={(val) => dispatch({type: 'UPDATE_TAG', payload: { ...tag, descripcion: val }})} /></td>
+                  <td className="px-4 py-3"><Badge variant={tag.tipo === 'bifurcado' ? 'blue' : 'amber'}>{tag.tipo === 'bifurcado' ? 'Bifurcado' : 'Único'}</Badge></td>
+                  <td className="px-4 py-3 text-right"><Button variant="ghost" size="icon" className="text-red-500 hover:bg-red-50" onClick={() => dispatch({ type: 'DELETE_TAG', payload: tag.id })}><Trash2 className="w-4 h-4" /></Button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// --- 📈 MÓDULO INDICADORES ---
+const IndicadorForm = ({ isOpen, onClose, indicadorEdit = null }: { isOpen: boolean, onClose: () => void, indicadorEdit?: Indicador | null }) => {
+  const { state, dispatch } = useAppStore();
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<Partial<Indicador>>({ nombre: '', identificador: '', concepto_medicion: '', normatividad: '', metodo_medida: '', frecuencia: 'MENSUAL', unidad_medida: '', tiempo_correccion_valor: null, tiempo_correccion_unidad: 'N/A', condiciones: [] });
+  const [isAddingCond, setIsAddingCond] = useState(false);
+  const [newCond, setNewCond] = useState<Partial<CondicionIndicador>>({ nombre: '', tipo: 'PUNTUAL', operador: '<=', valor: 0, unidad: '' });
+
+  useEffect(() => {
+    if (isOpen) {
+      if (indicadorEdit) setForm({ ...indicadorEdit });
+      else setForm({ nombre: '', identificador: '', concepto_medicion: '', normatividad: '', metodo_medida: '', frecuencia: 'MENSUAL', unidad_medida: '', tiempo_correccion_valor: null, tiempo_correccion_unidad: 'N/A', condiciones: [] });
+      setError(null); setIsAddingCond(false);
+    }
+  }, [isOpen, indicadorEdit]);
+
+  const handleSave = () => {
+    if (!form.nombre?.trim() || !form.identificador?.trim()) return setError("Nombre e identificador son obligatorios.");
+    if (!form.condiciones || form.condiciones.length === 0) return setError("Agregue al menos 1 condición.");
+    const isDuplicate = state.indicadores.some(i => i.identificador.toLowerCase() === form.identificador?.toLowerCase() && i.id !== indicadorEdit?.id);
+    if (isDuplicate) return setError(`Identificador "${form.identificador}" ya existe.`);
+    if (indicadorEdit) dispatch({ type: 'UPDATE_INDICADOR', payload: form as Indicador });
+    else dispatch({ type: 'ADD_INDICADOR', payload: form as any });
+    onClose();
+  };
+
+  const handleAddCondicion = () => {
+    if (!newCond.nombre?.trim()) return;
+    const cond: CondicionIndicador = { id: generateId(), nombre: newCond.nombre, tipo: newCond.tipo as TipoCondicion, operador: newCond.operador as OperadorCondicion, valor: Number(newCond.valor), valor_max: newCond.operador === 'between' ? Number(newCond.valor_max) : undefined, unidad: newCond.unidad || form.unidad_medida || '' };
+    setForm(prev => ({ ...prev, condiciones: [...(prev.condiciones || []), cond] }));
+    setIsAddingCond(false); setNewCond({ nombre: '', tipo: 'PUNTUAL', operador: '<=', valor: 0, unidad: form.unidad_medida || '' });
+  };
+
+  return (
+    <SlidePanel isOpen={isOpen} onClose={onClose} title={indicadorEdit ? "Editar Indicador" : "Nuevo Indicador"} customWidth="w-full sm:w-[680px]">
+      <div className="p-6 space-y-8 pb-24">
+        {error && <div className="p-3 bg-red-50 text-red-600 rounded-md border flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> {error}</div>}
+        <section className="space-y-4">
+          <h3 className="text-sm font-bold text-[#1B3A6B] border-b pb-2">Identificación</h3>
+          <div className="grid grid-cols-3 gap-4"><div className="col-span-2"><label className="text-xs font-semibold block mb-1">Nombre</label><Input value={form.nombre} onChange={(e: any) => setForm({...form, nombre: e.target.value})} /></div><div><label className="text-xs font-semibold block mb-1">ID</label><Input value={form.identificador} onChange={(e: any) => setForm({...form, identificador: e.target.value.toUpperCase()})} /></div></div>
+        </section>
+        <section className="space-y-4">
+          <h3 className="text-sm font-bold text-[#1B3A6B] border-b pb-2">Parámetros</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="text-xs font-semibold block mb-1">Frecuencia</label><Select value={form.frecuencia} onChange={(e: any) => setForm({...form, frecuencia: e.target.value})}>{Object.entries(FRECUENCIAS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</Select></div>
+            <div><label className="text-xs font-semibold block mb-1">Unidad (Global)</label><Input value={form.unidad_medida} onChange={(e: any) => setForm({...form, unidad_medida: e.target.value})} /></div>
+          </div>
+        </section>
+        <section className="space-y-4">
+          <div className="flex justify-between items-center border-b pb-2"><h3 className="text-sm font-bold text-[#1B3A6B]">Condiciones</h3>{!isAddingCond && <Button size="sm" variant="outline" onClick={() => setIsAddingCond(true)}><Plus className="w-4 h-4" /> Agregar</Button>}</div>
+          <div className="border rounded-md bg-white">
+            <table className="w-full text-xs text-left"><thead className="bg-slate-50 border-b"><tr><th className="p-2">Nombre</th><th className="p-2">Tipo</th><th className="p-2">Operador</th><th className="p-2">Valor</th><th className="p-2">Unidad</th><th className="p-2"></th></tr></thead>
+              <tbody className="divide-y">
+                {form.condiciones?.map(c => (
+                  <tr key={c.id}>
+                    <td className="p-2 font-medium">{c.nombre}</td><td className="p-2"><Badge variant="cyan">{c.tipo}</Badge></td>
+                    <td className="p-2 font-mono">{c.operador}</td><td className="p-2">{c.operador === 'between' ? `${c.valor} - ${c.valor_max}` : c.valor}</td>
+                    <td className="p-2">{c.unidad}</td><td className="p-2 text-right"><button onClick={() => setForm(p => ({...p, condiciones: p.condiciones?.filter(x => x.id !== c.id)}))}><X className="w-4 h-4 text-red-400" /></button></td>
+                  </tr>
+                ))}
+                {isAddingCond && (
+                  <tr className="bg-blue-50/50">
+                    <td className="p-1"><Input className="h-7 text-xs" value={newCond.nombre} onChange={(e: any) => setNewCond({...newCond, nombre: e.target.value})} /></td>
+                    <td className="p-1"><Select className="h-7 text-xs" value={newCond.tipo} onChange={(e: any) => setNewCond({...newCond, tipo: e.target.value})}><option value="PUNTUAL">PUNTUAL</option><option value="MEDIO">MEDIO</option><option value="GENERAL">GENERAL</option></Select></td>
+                    <td className="p-1"><Select className="h-7 text-xs" value={newCond.operador} onChange={(e: any) => setNewCond({...newCond, operador: e.target.value})}><option value="<=">{'<='}</option><option value=">=">{'>='}</option><option value="between">between</option></Select></td>
+                    <td className="p-1"><Input className="h-7 text-xs w-16 inline-block" type="number" value={newCond.valor} onChange={(e: any) => setNewCond({...newCond, valor: e.target.value})} /> {newCond.operador==='between' && <Input className="h-7 text-xs w-16 inline-block ml-1" type="number" value={newCond.valor_max||''} onChange={(e: any) => setNewCond({...newCond, valor_max: e.target.value})} />}</td>
+                    <td className="p-1"><Input className="h-7 text-xs w-12" value={newCond.unidad} onChange={(e: any) => setNewCond({...newCond, unidad: e.target.value})} /></td>
+                    <td className="p-1 text-right flex gap-1"><button onClick={handleAddCondicion} className="text-green-600"><Check className="w-4 h-4" /></button><button onClick={() => setIsAddingCond(false)} className="text-red-500"><X className="w-4 h-4" /></button></td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t flex justify-end gap-3 z-10"><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={handleSave}><Save className="w-4 h-4 mr-2" /> Guardar</Button></div>
+    </SlidePanel>
+  );
+};
+
+const IndicadorDetalle = ({ isOpen, onClose, indicador }: { isOpen: boolean, onClose: () => void, indicador: Indicador | null }) => {
+  if (!indicador) return null;
+  return (
+    <SlidePanel isOpen={isOpen} onClose={onClose} title="Detalle del Indicador" customWidth="w-full sm:w-[720px]">
+      <div className="p-6 space-y-8">
+        <div className="flex items-start gap-4 pb-6 border-b">
+          <div className="w-16 h-16 rounded-xl bg-[#00C2D4]/10 flex items-center justify-center text-[#0A1628] font-bold text-2xl">{indicador.identificador}</div>
+          <div><h1 className="text-2xl font-bold mb-2">{indicador.nombre}</h1><Badge variant="blue"><Clock className="w-3 h-3 mr-1" /> {FRECUENCIAS[indicador.frecuencia].label}</Badge></div>
+        </div>
+        <section className="space-y-4">
+           <h3 className="text-sm font-bold border-b pb-2">Condiciones de Aceptación</h3>
+           <div className="space-y-2">
+             {indicador.condiciones.map((c) => (
+               <div key={c.id} className="flex justify-between p-3 bg-white border rounded shadow-sm">
+                 <div className="flex gap-3 items-center"><Badge variant="cyan">{c.tipo}</Badge><span className="font-medium">{c.nombre}</span></div>
+                 <div className="font-mono text-[#1B3A6B] font-bold bg-slate-100 px-3 py-1 rounded">{c.operador} {c.valor} {c.operador === 'between' ? `y ${c.valor_max}` : ''} {c.unidad}</div>
+               </div>
+             ))}
+           </div>
+        </section>
+      </div>
+    </SlidePanel>
+  );
+};
+
+const IndicadoresView = () => {
+  const { state, dispatch } = useAppStore();
+  const [viewMode, setViewMode] = useState<'lista' | 'tarjetas'>('lista');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [selectedIndicador, setSelectedIndicador] = useState<Indicador | null>(null);
+  const [indicadorToDelete, setIndicadorToDelete] = useState<Indicador | null>(null);
+
+  const filteredData = useMemo(() => state.indicadores.filter(i => i.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || i.identificador.toLowerCase().includes(searchTerm.toLowerCase())), [state.indicadores, searchTerm]);
+
+  return (
+    <div className="space-y-6 animate-in fade-in h-full flex flex-col">
+      <div className="flex justify-between items-end shrink-0">
+        <div><h1 className="text-2xl font-bold text-[#0A1628]">Indicadores Normativos</h1><p className="text-slate-500 text-sm">Gestión de parámetros y límites técnicos.</p></div>
+        <Button onClick={() => { setSelectedIndicador(null); setIsFormOpen(true); }}><Plus className="w-4 h-4 mr-2" /> Nuevo Indicador</Button>
+      </div>
+
+      <InfoBanner title="Definición de Indicadores Contractuales">
+        En este módulo se configuran los límites y metas técnicas (Ej. IRI, Fricción, Ahuellamiento) según los apéndices técnicos de la concesión o normatividad (Ej. INVIAS). 
+        El sistema procesará los datos crudos de las mediciones y los evaluará contra los valores <strong>"Puntuales"</strong> (ej. bloques de 100m) y <strong>"Medios"</strong> (ej. promedio cada kilómetro) definidos aquí.
+      </InfoBanner>
+
+      <div className="flex justify-between items-center bg-white p-2 rounded-lg border shadow-sm shrink-0">
+        <div className="relative w-72"><Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" /><Input placeholder="Buscar..." className="pl-9 h-10 border-none" value={searchTerm} onChange={(e: any) => setSearchTerm(e.target.value)} /></div>
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-md">
+          <button className={`p-2 rounded ${viewMode === 'lista' ? 'bg-white shadow text-[#00C2D4]' : 'text-slate-500'}`} onClick={() => setViewMode('lista')}><List className="w-4 h-4" /></button>
+          <button className={`p-2 rounded ${viewMode === 'tarjetas' ? 'bg-white shadow text-[#00C2D4]' : 'text-slate-500'}`} onClick={() => setViewMode('tarjetas')}><Grid className="w-4 h-4" /></button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto pb-8">
+        {viewMode === 'lista' ? (
+          <Card className="overflow-hidden">
+            <table className="w-full text-sm text-left"><thead className="bg-slate-50 border-b"><tr><th className="p-3 w-16">ID</th><th className="p-3">Nombre</th><th className="p-3">Frecuencia</th><th className="p-3 text-center">Condiciones</th><th className="p-3 text-right">Acciones</th></tr></thead>
+              <tbody className="divide-y">
+                {filteredData.map(ind => (
+                  <tr key={ind.id} className="hover:bg-slate-50">
+                    <td className="p-3 font-bold text-[#1B3A6B]">{ind.identificador}</td><td className="p-3 font-medium">{ind.nombre}</td><td className="p-3"><Badge>{FRECUENCIAS[ind.frecuencia].label}</Badge></td>
+                    <td className="p-3 text-center"><span className="w-6 h-6 inline-flex items-center justify-center rounded-full bg-slate-100 font-bold">{ind.condiciones.length}</span></td>
+                    <td className="p-3 text-right space-x-1">
+                      <Button variant="ghost" size="icon" onClick={() => {setSelectedIndicador(ind); setIsDetailOpen(true);}}><Eye className="w-4 h-4 text-blue-500" /></Button>
+                      <Button variant="ghost" size="icon" onClick={() => {setSelectedIndicador(ind); setIsFormOpen(true);}}><Edit2 className="w-4 h-4 text-slate-500" /></Button>
+                      <Button variant="ghost" size="icon" onClick={() => setIndicadorToDelete(ind)}><Trash2 className="w-4 h-4 text-red-500" /></Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredData.map(ind => (
+               <Card key={ind.id} className="p-5 flex flex-col h-full"><h3 className="font-bold text-lg mb-4">{ind.identificador} - {ind.nombre}</h3><div className="mt-auto flex gap-2"><Button variant="outline" className="flex-1" onClick={() => {setSelectedIndicador(ind); setIsDetailOpen(true);}}>Ver</Button><Button variant="outline" className="flex-1" onClick={() => {setSelectedIndicador(ind); setIsFormOpen(true);}}>Editar</Button></div></Card>
+            ))}
+          </div>
+        )}
+      </div>
+      <IndicadorForm isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} indicadorEdit={selectedIndicador} />
+      <IndicadorDetalle isOpen={isDetailOpen} onClose={() => setIsDetailOpen(false)} indicador={selectedIndicador} />
+      <ConfirmDialog isOpen={indicadorToDelete !== null} title="Eliminar" message="¿Seguro?" onClose={() => setIndicadorToDelete(null)} onConfirm={() => { if(indicadorToDelete) dispatch({ type: 'DELETE_INDICADOR', payload: indicadorToDelete.id }); setIndicadorToDelete(null); }} />
+    </div>
+  );
+};
+
+// --- 📊 MÓDULO MEDICIONES: NUEVA MEDICIÓN (WIZARD) ---
+const NuevaMedicionWizard = () => {
+  const { state, dispatch, changeView } = useAppStore();
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState({ proyectoId: state.activeProjectId || '', ufId: '', rutaId: '', indicadorId: '', fecha: new Date().toISOString().split('T')[0] });
+  const [carrilesSeleccionados, setCarrilesSeleccionados] = useState<string[]>([]);
+  const [parsedData, setParsedData] = useState<DatosIRI | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processError, setProcessError] = useState<string | null>(null);
+
+  const ufs = state.unidadesFuncionales.filter(u => u.proyectoId === form.proyectoId);
+  const rutas = state.rutas.filter(r => r.unidadFuncionalId === form.ufId);
+  const rutaActiva = state.rutas.find(r => r.id === form.rutaId);
+  const indicadorActivo = state.indicadores.find(i => i.id === form.indicadorId);
+
+  const toggleCarril = (tag: string) => carrilesSeleccionados.includes(tag) ? setCarrilesSeleccionados(prev => prev.filter(t => t !== tag)) : setCarrilesSeleccionados(prev => [...prev, tag]);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsProcessing(true); setProcessError(null); setParsedData(null);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        if (!indicadorActivo) throw new Error("No hay indicador");
+        
+        const condPuntual = indicadorActivo.condiciones.find(c => c.tipo === 'PUNTUAL')?.valor || 
+                            indicadorActivo.condiciones.find(c => c.tipo === 'GENERAL')?.valor || 3.5;
+        const condMedio = indicadorActivo.condiciones.find(c => c.tipo === 'MEDIO')?.valor || 
+                          indicadorActivo.condiciones.find(c => c.tipo === 'GENERAL')?.valor || 3.0;
+
+        setParsedData(parsearArchivoIRI(text, condPuntual, condMedio));
+      } catch (err: any) { setProcessError(err.message || "Error al parsear."); } 
+      finally { setIsProcessing(false); }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSaveAll = async () => {
+    if (!parsedData || !indicadorActivo) return;
+    const { registros_base, ...lightData } = parsedData;
+    for (const carril of carrilesSeleccionados) {
+      const medicionId = `med_${generateId()}`;
+      await saveBaseRecords(medicionId, registros_base);
+      dispatch({ type: 'ADD_MEDICION', payload: { id: medicionId, proyectoId: form.proyectoId, unidadFuncionalId: form.ufId, rutaId: form.rutaId, carrilesSeleccionados: [carril], indicadorId: form.indicadorId, fecha: form.fecha, datos: lightData, tiene_datos_base: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } });
+    }
+    changeView('mediciones_list');
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6 pb-20">
+      <div className="flex items-center gap-4 mb-8"><Button variant="ghost" size="icon" onClick={() => changeView('mediciones_list')}><ChevronLeft className="w-5 h-5" /></Button><div><h1 className="text-2xl font-bold">Nueva Medición</h1></div></div>
+      <div className="flex items-center justify-between relative mb-12 px-4">
+        <div className="absolute left-8 right-8 top-1/2 h-1 bg-slate-200 -z-10 -translate-y-1/2 rounded-full"></div>
+        <div className="absolute left-8 top-1/2 h-1 bg-[#00C2D4] -z-10 -translate-y-1/2 transition-all duration-500" style={{ width: `${((step - 1) / 3) * 100}%` }}></div>
+        {[1, 2, 3, 4].map(s => <div key={s} className={`w-10 h-10 rounded-full flex items-center justify-center font-bold border-4 ${step >= s ? 'bg-[#00C2D4] border-white text-[#0A1628]' : 'bg-slate-100 border-white text-slate-400'}`}>{step > s ? <Check className="w-5 h-5" /> : s}</div>)}
+      </div>
+
+      {step === 1 && (
+        <Card className="p-6 animate-in fade-in">
+          <h2 className="text-lg font-bold mb-6 border-b pb-2">1. Contexto</h2>
+          <div className="grid grid-cols-2 gap-8"><div className="space-y-4">
+              <div><label className="text-xs font-semibold block mb-1">Proyecto</label><Select value={form.proyectoId} onChange={(e:any) => setForm({...form, proyectoId: e.target.value, ufId: '', rutaId: ''})}><option value="">Seleccione...</option>{state.proyectos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}</Select></div>
+              <div><label className="text-xs font-semibold block mb-1">UF</label><Select value={form.ufId} onChange={(e:any) => setForm({...form, ufId: e.target.value, rutaId: ''})} disabled={!form.proyectoId}><option value="">Seleccione...</option>{ufs.map(u => <option key={u.id} value={u.id}>{u.nombre}</option>)}</Select></div>
+              <div><label className="text-xs font-semibold block mb-1">Ruta</label><Select value={form.rutaId} onChange={(e:any) => setForm({...form, rutaId: e.target.value})} disabled={!form.ufId}><option value="">Seleccione...</option>{rutas.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}</Select></div>
+            </div><div className="space-y-4">
+              <div><label className="text-xs font-semibold block mb-1">Indicador</label><Select value={form.indicadorId} onChange={(e:any) => setForm({...form, indicadorId: e.target.value})}><option value="">Seleccione...</option>{state.indicadores.map(i => <option key={i.id} value={i.id}>{i.identificador} - {i.nombre}</option>)}</Select></div>
+              <div><label className="text-xs font-semibold block mb-1">Fecha</label><Input type="date" value={form.fecha} onChange={(e:any) => setForm({...form, fecha: e.target.value})} /></div>
+            </div></div>
+          <div className="mt-8 flex justify-end"><Button onClick={() => {setStep(2); setCarrilesSeleccionados([]);}} disabled={!form.proyectoId || !form.ufId || !form.rutaId || !form.indicadorId || !form.fecha}>Siguiente <ChevronRight className="w-4 h-4 ml-1" /></Button></div>
+        </Card>
+      )}
+
+      {step === 2 && (
+        <Card className="p-6 animate-in fade-in">
+          <h2 className="text-lg font-bold mb-2 border-b pb-2">2. Carriles</h2>
+          <div className="grid grid-cols-2 gap-4 mb-6">{rutaActiva?.carrilesTags.map(tag => {
+              const isSelected = carrilesSeleccionados.includes(tag);
+              return (<div key={tag} onClick={() => toggleCarril(tag)} className={`p-4 rounded-lg border-2 cursor-pointer flex items-center gap-4 ${isSelected ? 'border-[#00C2D4] bg-[#00C2D4]/5' : 'border-slate-200'}`}><div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 ${isSelected ? 'border-[#00C2D4] bg-[#00C2D4] text-[#0A1628]' : 'border-slate-300 text-transparent'}`}><Check className="w-4 h-4" /></div><span className="font-bold text-lg">{tag}</span></div>);
+            })}</div>
+          <div className="mt-8 flex justify-between"><Button variant="outline" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Anterior</Button><Button onClick={() => setStep(3)} disabled={carrilesSeleccionados.length === 0}>Siguiente <ChevronRight className="w-4 h-4 ml-1" /></Button></div>
+        </Card>
+      )}
+
+      {step === 3 && (
+        <Card className="p-6 animate-in fade-in">
+          <h2 className="text-lg font-bold mb-6 border-b pb-2">3. Carga de Datos</h2>
+          
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm text-slate-600">
+              El archivo debe tener exactamente 5 columnas. 
+              <strong> No incluir RUTA ni columnas de promedios.</strong>
+            </p>
+            <Button variant="outline" size="sm" onClick={descargarTemplatIRI}>
+              <Download className="w-4 h-4 mr-2" /> Descargar plantilla
+            </Button>
+          </div>
+
+          {!parsedData && !isProcessing && (
+            <div className="border-2 border-dashed border-slate-300 rounded-xl p-12 text-center relative"><input type="file" accept=".csv" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleFileUpload} /><UploadCloud className="w-12 h-12 text-[#00C2D4] mx-auto mb-4" /><h3 className="font-bold">Arrastra el archivo CSV aquí</h3></div>
+          )}
+          {processError && <div className="bg-red-50 text-red-600 p-4 rounded-md mt-4 border">{processError}</div>}
+          {parsedData && (
+            <div className="space-y-6">
+              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-lg">
+                <h4 className="font-bold text-emerald-800">Procesado Correctamente</h4>
+                <p className="text-sm">Analizados {parsedData.estadisticas.total_registros_base} registros base con un intervalo dinámico de {parsedData.intervalo_base_m}m.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setParsedData(null)} className="w-full">Subir otro archivo</Button>
+            </div>
+          )}
+          <div className="mt-8 flex justify-between"><Button variant="outline" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Anterior</Button><Button onClick={() => setStep(4)} disabled={!parsedData}>Siguiente <ChevronRight className="w-4 h-4 ml-1" /></Button></div>
+        </Card>
+      )}
+
+      {step === 4 && parsedData && (
+        <Card className="p-6 animate-in fade-in">
+          <h2 className="text-lg font-bold mb-6 border-b pb-2">4. Confirmación Final</h2>
+          <div className="bg-slate-50 p-6 rounded-xl border space-y-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div><span className="text-slate-500 block">Ruta:</span><span className="font-bold text-lg">{rutaActiva?.nombre}</span></div>
+              <div className="col-span-2 border-t pt-4 mt-2">
+                <div className={`p-4 rounded-lg flex items-center gap-3 ${parsedData.estadisticas.cumple_global ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-red-100 text-red-800 border-red-200'}`}>
+                  {parsedData.estadisticas.cumple_global ? <Check className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
+                  <h4 className="font-bold text-lg">Estado Global: {parsedData.estadisticas.cumple_global ? 'CUMPLE' : 'INCUMPLE'}</h4>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="mt-8 flex justify-between"><Button variant="outline" onClick={() => setStep(3)}><ChevronLeft className="w-4 h-4 mr-1" /> Anterior</Button><Button onClick={handleSaveAll} className="px-8"><Save className="w-5 h-5 mr-2" /> GUARDAR</Button></div>
+        </Card>
+      )}
+    </div>
+  );
+};
+
+
+// --- 📊 MÓDULO MEDICIONES: VISTA DETALLE Y GRÁFICAS MULTI-AÑO ---
+const COLOR_PAIRS = [
+  { izq: '#60a5fa', der: '#1d4ed8' }, 
+  { izq: '#fb923c', der: '#c2410c' }, 
+  { izq: '#4ade80', der: '#14532d' }, 
+  { izq: '#c084fc', der: '#6b21a8' }, 
+  { izq: '#f472b6', der: '#be185d' }, 
+  { izq: '#facc15', der: '#a16207' }, 
+];
+
+const MedicionDetalleView = () => {
+  const { state, viewProps, changeView } = useAppStore();
+  const medicionBase = viewProps?.medicion as Medicion;
+  
+  const [baseDataMap, setBaseDataMap] = useState<Record<string, IRI_RegistroBase[]>>({});
+  const [viewMode, setViewMode] = useState<'100m' | '20m'>('100m');
+  const [isLoadingBase, setIsLoadingBase] = useState(false);
+  const [brushIndexes, setBrushIndexes] = useState<{startIndex: number, endIndex: number} | null>(null);
+  const [fullscreenChart, setFullscreenChart] = useState<'line' | 'bar' | null>(null);
+
+  const indicador = state.indicadores.find(i => i.id === medicionBase?.indicadorId);
+  const condPuntual = indicador?.condiciones.find(c => c.tipo === 'PUNTUAL')?.valor || indicador?.condiciones.find(c => c.tipo === 'GENERAL')?.valor || 3.5;
+  const condMedio   = indicador?.condiciones.find(c => c.tipo === 'MEDIO')?.valor || indicador?.condiciones.find(c => c.tipo === 'GENERAL')?.valor || 3.0;
+
+  const medicionesPares = useMemo(() => {
+    if (!medicionBase) return [];
+    return state.mediciones.filter(m =>
+      m.rutaId === medicionBase.rutaId &&
+      m.indicadorId === medicionBase.indicadorId &&
+      m.carrilesSeleccionados.some(t => medicionBase.carrilesSeleccionados.includes(t))
+    ).sort((a, b) => a.fecha.localeCompare(b.fecha)); 
+  }, [state.mediciones, medicionBase]);
+
+  const medicionesConLabel = useMemo(() => {
+    const dateGroups: Record<string, number> = {};
+    medicionesPares.forEach(m => { dateGroups[m.fecha] = (dateGroups[m.fecha] || 0) + 1; });
+    const counters: Record<string, number> = {};
+    return medicionesPares.map(m => {
+       if (dateGroups[m.fecha] > 1) {
+          counters[m.fecha] = (counters[m.fecha] || 0) + 1;
+          return { ...m, label: `${m.fecha} (Tramo ${counters[m.fecha]})` };
+       }
+       return { ...m, label: m.fecha };
+    });
+  }, [medicionesPares]);
+
+  const [selectedMedIds, setSelectedMedIds] = useState<string[]>([]);
+  
+  const yearColorMap = useMemo(() => {
+    const uniqueYears = Array.from(new Set(medicionesConLabel.map(m => m.fecha.substring(0, 4)))).sort();
+    const map: Record<string, {izq: string, der: string}> = {};
+    uniqueYears.forEach((year, idx) => { map[year] = COLOR_PAIRS[idx % COLOR_PAIRS.length]; });
+    return map;
+  }, [medicionesConLabel]);
+
+  useEffect(() => {
+    if (medicionBase && selectedMedIds.length === 0) setSelectedMedIds([medicionBase.id]);
+  }, [medicionBase]);
+
+  useEffect(() => { setBrushIndexes(null); }, [viewMode, selectedMedIds]);
+
+  const toggleMedicion = (id: string) => setSelectedMedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const combinedData = useMemo(() => {
+    if (selectedMedIds.length === 0) return null;
+    const allPuntuales: IRI_RegistroPuntual[] = [];
+    const selectedMeds = medicionesConLabel.filter(m => selectedMedIds.includes(m.id));
+    
+    selectedMeds.forEach(m => allPuntuales.push(...m.datos.registros_puntual));
+    if (allPuntuales.length === 0) return null;
+    allPuntuales.sort((a,b) => a.from_m - b.from_m);
+
+    const { stats, km } = agruparPorKm(allPuntuales, false, condPuntual, condMedio);
+    if (!stats) return null;
+    return { stats, km };
+  }, [medicionesConLabel, selectedMedIds, condPuntual, condMedio]);
+
+  const combinedDataCrudo = useMemo(() => {
+    if (selectedMedIds.length === 0) return null;
+    const allBaseRecords: IRI_RegistroBase[] = [];
+    let missingData = false;
+    selectedMedIds.forEach(id => {
+      if (baseDataMap[id]) allBaseRecords.push(...baseDataMap[id]);
+      else missingData = true; 
+    });
+    if (missingData && allBaseRecords.length === 0) return null;
+    
+    allBaseRecords.sort((a,b) => a.from_m - b.from_m);
+    const { stats, km } = agruparPorKm(allBaseRecords, true, condPuntual, condMedio);
+    if (!stats) return null;
+    return { stats, km };
+  }, [selectedMedIds, baseDataMap, condPuntual, condMedio]);
+
+  const activeData = viewMode === '100m' ? combinedData : combinedDataCrudo;
+  const safeActiveData = activeData || {
+    stats: { valor_max_puntual: 0, valor_medio_global: 0, porcentaje_cumplimiento: 0, n_incumplimientos_puntual: 0, cumple_global: true, n_km_incumplen: 0 },
+    km: [] as IRI_ResumenKm[]
+  };
+
+  useEffect(() => {
+    if (viewMode === '20m') {
+      const fetchMissing = async () => {
+        setIsLoadingBase(true);
+        const newMap = { ...baseDataMap };
+        let changed = false;
+        for (const id of selectedMedIds) {
+          if (!newMap[id]) {
+             const data = await getBaseRecords(id);
+             newMap[id] = data;
+             changed = true;
+          }
+        }
+        if (changed) setBaseDataMap(newMap);
+        setIsLoadingBase(false);
+      };
+      fetchMissing();
+    }
+  }, [viewMode, selectedMedIds]);
+
+  const chartData100m = useMemo(() => {
+    const abscisasSet = new Set<number>();
+    const selectedMeds = medicionesConLabel.filter(m => selectedMedIds.includes(m.id));
+    selectedMeds.forEach(m => m.datos.registros_puntual.forEach(r => abscisasSet.add(r.from_m)));
+    
+    return Array.from(abscisasSet).sort((a,b)=>a-b).map(abs => {
+      const pt: any = { abscisa: abs };
+      selectedMeds.forEach(m => {
+        const r = m.datos.registros_puntual.find(x => x.from_m === abs);
+        if (r) pt[m.id] = parseFloat(r.valor.toFixed(3));
+      });
+      return pt;
+    });
+  }, [medicionesConLabel, selectedMedIds]);
+
+  const chartData20m = useMemo(() => {
+    const abscisasSet = new Set<number>();
+    const selectedMeds = medicionesConLabel.filter(m => selectedMedIds.includes(m.id));
+    selectedMeds.forEach(m => {
+      const bData = baseDataMap[m.id] || [];
+      bData.forEach(r => abscisasSet.add(r.from_m));
+    });
+    
+    return Array.from(abscisasSet).sort((a,b)=>a-b).map(abs => {
+      const pt: any = { abscisa: abs };
+      selectedMeds.forEach(m => {
+        const bData = baseDataMap[m.id] || [];
+        const r = bData.find(x => x.from_m === abs);
+        if (r) {
+          pt[`${m.id}_izq`] = r.iri_izq;
+          pt[`${m.id}_der`] = r.iri_der;
+        }
+      });
+      return pt;
+    });
+  }, [medicionesConLabel, selectedMedIds, baseDataMap]);
+
+  const handleBarClick = useCallback((data: any) => {
+    if (!data || !data.activePayload || data.activePayload.length === 0) return;
+    const { from_m, to_m } = data.activePayload[0].payload;
+    const currentChartData = viewMode === '100m' ? chartData100m : chartData20m;
+    
+    const startIdx = currentChartData.findIndex(d => d.abscisa >= from_m);
+    let endIdx = currentChartData.findIndex(d => d.abscisa >= to_m);
+    
+    if (endIdx === -1) endIdx = currentChartData.length - 1;
+    else if (endIdx > 0 && currentChartData[endIdx].abscisa > to_m) endIdx -= 1;
+    
+    if (startIdx !== -1) {
+      setBrushIndexes({ startIndex: startIdx, endIndex: endIdx });
+    }
+  }, [viewMode, chartData100m, chartData20m]);
+
+  // Lógica para escalas enteras amigables
+  const getNiceMax = (val: number) => {
+    const ceil = Math.ceil(val);
+    if (ceil <= 4) return 4;
+    if (ceil <= 6) return 6;
+    if (ceil <= 8) return 8;
+    if (ceil <= 10) return 10;
+    return Math.ceil(ceil / 5) * 5;
+  };
+
+  const maxDomain100m = getNiceMax(Math.max(condPuntual * 1.5, safeActiveData.stats.valor_max_puntual * 1.1));
+
+  const maxDomain20m = useMemo(() => {
+     let max = 0;
+     selectedMedIds.forEach(id => {
+        (baseDataMap[id] || []).forEach(r => {
+           if (r.iri_izq > max) max = r.iri_izq;
+           if (r.iri_der > max) max = r.iri_der;
+        });
+     });
+     return getNiceMax(Math.max(condPuntual * 1.5, max * 1.1));
+  }, [baseDataMap, selectedMedIds, condPuntual]);
+
+  const formatAbscisa = (val: number) => {
+    const km   = Math.floor(val / 1000);
+    const rest = String(val % 1000).padStart(3, '0');
+    return `K${km}+${rest}`;
+  };
+
+  const CustomDot100m = (props: any) => {
+    const { cx, cy, value, stroke } = props;
+    if (value == null || cx == null || cy == null) return null;
+    if (value > condPuntual) return <circle cx={cx} cy={cy} r={4} fill="#ef4444" stroke="none" />;
+    return <circle cx={cx} cy={cy} r={2} fill={stroke} stroke="none" />;
+  };
+
+  const CustomDot20m = (props: any) => {
+    const { cx, cy, value } = props;
+    if (value == null || cx == null || cy == null) return null; 
+    if (value > condPuntual) return <circle cx={cx} cy={cy} r={4} fill="#ef4444" stroke="none" />;
+    return null;
+  };
+
+  if (!medicionBase || !indicador) return null;
+  const proy  = state.proyectos.find(p => p.id === medicionBase.proyectoId);
+  const uf    = state.unidadesFuncionales.find(u => u.id === medicionBase.unidadFuncionalId);
+  const ruta  = state.rutas.find(r => r.id === medicionBase.rutaId);
+
+  return (
+    <div className="space-y-6 pb-20 animate-in fade-in">
+      <div className="flex items-center gap-2 text-sm text-slate-500">
+        <Button variant="ghost" size="sm" onClick={() => changeView('mediciones_list')}><ChevronLeft className="w-4 h-4 mr-1" /> Mediciones</Button>
+        <ChevronRight className="w-3 h-3" /><span>{proy?.nombre}</span><ChevronRight className="w-3 h-3" /><span>{uf?.nombre}</span><ChevronRight className="w-3 h-3" /><span className="font-semibold text-[#1B3A6B]">{ruta?.nombre}</span>
+      </div>
+
+      <div className="flex justify-between items-end flex-wrap gap-4">
+        <div>
+          <h1 className="text-3xl font-bold mb-2 font-heading">
+            {indicador.nombre}
+            <span className="ml-3 text-lg text-slate-400 font-normal">[{medicionBase.carrilesSeleccionados.join(', ')}]</span>
+          </h1>
+          <div className="flex gap-2 flex-wrap">
+            <Badge variant="blue">{indicador.identificador}</Badge>
+            {activeData ? (
+              <Badge variant={safeActiveData.stats.cumple_global ? 'green' : 'red'}>
+                {safeActiveData.stats.cumple_global ? '✓ CUMPLE GLOBAL (Selección)' : '✗ INCUMPLE GLOBAL (Selección)'}
+              </Badge>
+            ) : (<Badge variant="default">Sin tramos seleccionados</Badge>)}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: `Valor máx. ${viewMode === '100m' ? 'puntual' : 'crudo'}`, value: safeActiveData.stats.valor_max_puntual.toFixed(2), unit: indicador.unidad_medida, ok: safeActiveData.stats.valor_max_puntual <= condPuntual },
+          { label: `Valor medio global (${viewMode})`, value: safeActiveData.stats.valor_medio_global.toFixed(2), unit: indicador.unidad_medida, ok: safeActiveData.stats.valor_medio_global <= condMedio },
+          { label: '% Cumplimiento', value: safeActiveData.stats.porcentaje_cumplimiento.toFixed(1), unit: '%', ok: safeActiveData.stats.porcentaje_cumplimiento >= 100 },
+          { label: `Excesos (${viewMode === '100m' ? '100m' : 'Base'})`, value: String(safeActiveData.stats.n_incumplimientos_puntual), unit: 'puntos', ok: safeActiveData.stats.n_incumplimientos_puntual === 0 },
+        ].map((card, i) => (
+          <Card key={i} className={`p-4 border-l-4 ${card.ok ? 'border-l-emerald-400' : 'border-l-red-400 opacity-90'}`}>
+            <p className="text-xs text-slate-500 mb-1">{card.label}</p>
+            <p className={`text-2xl font-bold ${card.ok ? 'text-emerald-700' : 'text-red-600'}`}>{activeData ? card.value : '-'}</p>
+            <p className="text-xs text-slate-400">{card.unit}</p>
+          </Card>
+        ))}
+      </div>
+
+      <Card className={fullscreenChart === 'line' ? "fixed inset-0 z-[60] bg-white p-6 shadow-2xl flex flex-col" : "p-6"}>
+        <div className="flex justify-between items-start mb-6 flex-wrap gap-4">
+          <div>
+            <h3 className="font-bold text-lg font-heading"><TrendingUp className="inline w-5 h-5 text-[#00C2D4] mr-2" />Perfil de Medición</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Límite Analizado: {condPuntual} {indicador.unidad_medida}</p>
+          </div>
+
+          <div className="flex items-center gap-4">
+            {brushIndexes && (
+               <Button variant="outline" size="sm" onClick={() => setBrushIndexes(null)} className="h-7 text-xs border-[#00C2D4] text-[#00C2D4]"><Maximize className="w-3 h-3 mr-1" /> Restaurar Vista</Button>
+            )}
+            <div className="flex bg-slate-100 p-1 rounded-md">
+              <button className={`px-3 py-1 text-xs rounded transition-all ${viewMode === '100m' ? 'bg-white shadow text-[#00C2D4] font-semibold' : 'text-slate-500'}`} onClick={() => setViewMode('100m')}>Puntual (100m)</button>
+              <button className={`px-3 py-1 text-xs rounded transition-all ${viewMode === '20m' ? 'bg-white shadow text-[#00C2D4] font-semibold' : 'text-slate-500'}`} onClick={() => setViewMode('20m')}>Crudo ({medicionBase.datos.intervalo_base_m}m) {isLoadingBase && '...'}</button>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setFullscreenChart(fullscreenChart === 'line' ? null : 'line')} className="h-7 text-xs text-slate-500 hover:text-slate-800 shrink-0">
+               {fullscreenChart === 'line' ? <><Minimize className="w-3 h-3 mr-1" /> Salir</> : <><Maximize className="w-3 h-3 mr-1" /> Pantalla Completa</>}
+            </Button>
+          </div>
+        </div>
+        
+        <div className="bg-blue-50/50 p-3 rounded-md border border-blue-100 text-sm text-slate-600 mb-6 flex items-start gap-2">
+          <Info className="w-5 h-5 text-blue-500 shrink-0" />
+          <p><strong>Nota técnica:</strong> Algunos indicadores normativos evalúan de manera distinta el <strong>Valor Puntual (promedios en tramos más cortos)</strong> y el <strong>Valor Medio (cada 1km)</strong>. Los "datos crudos" representan la medición base pura registrada por el equipo; si observas puntos rojos en la vista cruda, indica que esa lectura bruta excedió el límite máximo permitido por la norma.</p>
+        </div>
+
+        {/* GRÁFICA 100m multi-tramo */}
+        {viewMode === '100m' && (
+          <div className={fullscreenChart === 'line' ? "flex-1 w-full min-h-0" : "h-[450px] w-full"}>
+            {selectedMedIds.length === 0 ? (
+               <div className="flex items-center justify-center h-full text-slate-400">Selecciona al menos un tramo para visualizar la gráfica.</div>
+            ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartData100m} margin={{ top: 10, right: 30, left: 10, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="abscisa" tickFormatter={formatAbscisa} tick={{ fontSize: 11, fill: '#64748b' }} minTickGap={60} />
+                <YAxis domain={[0, maxDomain100m]} tick={{ fontSize: 11, fill: '#64748b' }} />
+                <RechartsTooltip
+                  formatter={(value: any, name: string) => {
+                     const m = medicionesConLabel.find(x => x.id === name);
+                     return [`${Number(value).toFixed(3)} ${indicador.unidad_medida}`, m ? m.label : name];
+                  }}
+                  labelFormatter={(label) => `Abscisa: ${formatAbscisa(label as number)}`}
+                  contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                />
+                
+                <Brush 
+                  dataKey="abscisa" height={30} stroke="#00C2D4" tickFormatter={formatAbscisa} 
+                  startIndex={brushIndexes ? brushIndexes.startIndex : 0} 
+                  endIndex={brushIndexes ? brushIndexes.endIndex : chartData100m.length - 1} 
+                  onChange={(e: any) => setBrushIndexes({startIndex: e.startIndex, endIndex: e.endIndex})}
+                />
+
+                <ReferenceArea y1={condPuntual} y2={maxDomain100m} fill="#fee2e2" fillOpacity={0.4} />
+                <ReferenceLine y={condPuntual} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: `Límite ${condPuntual}`, position: 'insideTopRight', fontSize: 11, fill: '#ef4444' }} />
+                
+                {medicionesConLabel.filter(m => selectedMedIds.includes(m.id)).map((mObj) => {
+                  const year = mObj.fecha.substring(0, 4);
+                  const colorBase = yearColorMap[year]?.der || '#000';
+                  return <Line key={mObj.id} type="monotone" dataKey={mObj.id} name={mObj.id} stroke={colorBase} strokeWidth={2.5} dot={<CustomDot100m />} activeDot={{ r: 6, strokeWidth: 2 }} connectNulls={false} />;
+                })}
+                <Legend verticalAlign="top" height={36} formatter={(value) => { const m = medicionesConLabel.find(x => x.id === value); return m ? m.label : value; }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+            )}
+          </div>
+        )}
+
+        {/* GRÁFICA BASE (20m o la leída) multi-tramo */}
+        {viewMode === '20m' && (
+          <div className={fullscreenChart === 'line' ? "flex-1 w-full min-h-0" : "h-[450px] w-full"}>
+            {selectedMedIds.length === 0 ? (
+               <div className="flex items-center justify-center h-full text-slate-400">Selecciona al menos un tramo para visualizar la gráfica.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartData20m} margin={{ top: 10, right: 30, left: 10, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="abscisa" tickFormatter={formatAbscisa} tick={{ fontSize: 11 }} minTickGap={60} />
+                  <YAxis domain={[0, maxDomain20m]} tick={{ fontSize: 11 }} />
+                  <RechartsTooltip
+                    formatter={(v: any, name: string) => [`${Number(v).toFixed(3)} ${indicador.unidad_medida}`, name]}
+                    labelFormatter={(label) => `Abscisa: ${formatAbscisa(label as number)}`}
+                    contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                  />
+                  
+                  <Brush 
+                    dataKey="abscisa" height={30} stroke="#00C2D4" tickFormatter={formatAbscisa} 
+                    startIndex={brushIndexes ? brushIndexes.startIndex : 0} 
+                    endIndex={brushIndexes ? brushIndexes.endIndex : chartData20m.length - 1} 
+                    onChange={(e: any) => setBrushIndexes({startIndex: e.startIndex, endIndex: e.endIndex})}
+                  />
+
+                  <ReferenceArea y1={condPuntual} y2={maxDomain20m} fill="#fee2e2" fillOpacity={0.4} />
+                  <ReferenceLine y={condPuntual} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: `Límite ${condPuntual}`, position: 'insideTopRight', fontSize: 11, fill: '#ef4444' }} />
+                  
+                  {medicionesConLabel.filter(m => selectedMedIds.includes(m.id)).map((mObj) => {
+                     const year = mObj.fecha.substring(0, 4);
+                     const pair = yearColorMap[year] || COLOR_PAIRS[0];
+                     return (
+                        <React.Fragment key={mObj.id}>
+                          <Line type="monotone" dataKey={`${mObj.id}_izq`} name={`Medición Izquierda - ${mObj.label}`} stroke={pair.izq} strokeWidth={2} dot={<CustomDot20m />} activeDot={{ r: 4 }} connectNulls={false} />
+                          <Line type="monotone" dataKey={`${mObj.id}_der`} name={`Medición Derecha - ${mObj.label}`}  stroke={pair.der} strokeWidth={2} strokeDasharray="4 4" dot={<CustomDot20m />} activeDot={{ r: 4 }} connectNulls={false} />
+                        </React.Fragment>
+                     );
+                  })}
+                  <Legend verticalAlign="top" height={36} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className={fullscreenChart === 'bar' ? "fixed inset-0 z-[60] bg-white p-6 shadow-2xl flex flex-col" : "p-4 flex flex-col"}>
+          <div className="flex justify-between items-start mb-4">
+             <div>
+                <h3 className="font-bold text-sm mb-1"><BarChart2 className="inline w-4 h-4 mr-1 text-[#00C2D4]" />Valor Medio por Km (Evaluación Normativa)</h3>
+                <p className="text-xs text-slate-500 max-w-2xl">Promedio aritmético de las medidas en segmentos de 1,000m (basado en la abscisa inicial). Límite: ≤ {condMedio} {indicador.unidad_medida}. <br/><span className="text-blue-500 font-semibold">Haz clic en una barra para hacer zoom en la gráfica superior.</span></p>
+             </div>
+             <Button variant="ghost" size="sm" onClick={() => setFullscreenChart(fullscreenChart === 'bar' ? null : 'bar')} className="h-7 text-xs text-slate-500 hover:text-slate-800 shrink-0">
+               {fullscreenChart === 'bar' ? <><Minimize className="w-3 h-3 mr-1" /> Salir</> : <><Maximize className="w-3 h-3 mr-1" /> Expandir</>}
+            </Button>
+          </div>
+          <div className={fullscreenChart === 'bar' ? "flex-1 min-h-0 w-full" : "flex-1 min-h-[250px] w-full"}>
+            {safeActiveData.km.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={safeActiveData.km} margin={{ top: 10, right: 10, left: -20, bottom: 20 }} onClick={handleBarClick}>
+                <XAxis dataKey="km_label" tickFormatter={(val) => val.split(' ')[0]} tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <RechartsTooltip formatter={(v: any) => [`${Number(v).toFixed(2)} ${indicador.unidad_medida}`, 'Valor medio']} cursor={{ fill: 'transparent' }} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                <ReferenceLine y={condMedio} stroke="#f59e0b" strokeDasharray="4 2" />
+                <Brush dataKey="km_label" height={30} stroke="#00C2D4" tickFormatter={(val) => val.split(' ')[0]} />
+                <Bar dataKey="valor_medio" radius={[3, 3, 0, 0]} className="cursor-pointer hover:opacity-80 transition-opacity">
+                  {safeActiveData.km.map((entry, index) => <Cell key={index} fill={entry.cumple_medio ? '#10b981' : '#ef4444'} /> )}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-slate-400 text-xs">Sin datos</div>
+            )}
+          </div>
+        </Card>
+        
+        <Card className="lg:col-span-2 flex flex-col overflow-hidden">
+          <div className="p-3 border-b flex justify-between items-center bg-slate-50">
+            <h3 className="font-bold text-sm">Detalle de Incumplimientos y Promedios (Tramos Combinados)</h3>
+            <span className="text-xs text-slate-500">{safeActiveData.stats.n_km_incumplen} km incumplen / {safeActiveData.km.length} total</span>
+          </div>
+          <div className="flex-1 overflow-auto max-h-[300px]">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-white sticky top-0 font-semibold shadow-sm">
+                <tr>
+                  <th className="p-3">Km (Desde abscisa real)</th>
+                  <th className="p-3">Valor Medio</th>
+                  <th className="p-3 text-center">Incumplimientos ({viewMode === '100m' ? '100m' : 'Crudos'})</th>
+                  <th className="p-3">Estado Km</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {safeActiveData.km.map((km, i) => (
+                  <tr key={i} className={!km.cumple_km ? 'bg-red-50/40' : ''}>
+                    <td className="p-3 font-medium">{km.km_label}</td>
+                    <td className="p-3 font-bold">{km.valor_medio.toFixed(2)}</td>
+                    <td className="p-3 text-center">{km.n_incumplimientos > 0 ? <span className="inline-flex items-center gap-1 text-red-600 font-bold"><AlertCircle className="w-3 h-3" /> {km.n_incumplimientos}</span> : <span className="text-slate-400">0</span>}</td>
+                    <td className="p-3"><Badge variant={km.cumple_km ? 'green' : 'red'}>{km.cumple_km ? 'CUMPLE' : 'INCUMPLE'}</Badge></td>
+                  </tr>
+                ))}
+                {safeActiveData.km.length === 0 && <tr><td colSpan={4} className="p-4 text-center text-slate-400">Sin datos</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// --- 📊 MÓDULO MEDICIONES: LISTADO PRINCIPAL ---
+const MedicionesListView = () => {
+  const { state, dispatch, changeView } = useAppStore();
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300 h-full flex flex-col">
+      <div className="flex justify-between items-end shrink-0">
+        <div><h1 className="text-2xl font-bold">Mediciones Registradas</h1></div>
+        <Button onClick={() => changeView('nueva_medicion')}><Plus className="w-4 h-4 mr-2" /> Cargar Medición</Button>
+      </div>
+      
+      <InfoBanner title="Centro de Operaciones y Evaluaciones">
+        Aquí se consolida el historial de todas las mediciones cargadas por archivo CSV. Puedes filtrar por proyecto o indicador, y al hacer clic en el botón <strong>"Ver"</strong> entrarás a las gráficas avanzadas de cumplimiento, las cuales te permitirán detectar fallas milimétricas o generar los informes formales de cumplimiento de la concesión.
+      </InfoBanner>
+
+      <div className="flex-1 overflow-y-auto pb-8">
+        {state.mediciones.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400 bg-white rounded-xl border border-dashed"><BarChart2 className="w-16 h-16 mb-4 opacity-20" /><h3 className="font-bold">Sin mediciones</h3></div>
+        ) : (
+          <Card className="overflow-hidden">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-slate-50 font-semibold border-b"><tr><th className="p-3">Fecha</th><th className="p-3">Ruta</th><th className="p-3">Carril</th><th className="p-3">Indicador</th><th className="p-3 text-center">Estado</th><th className="p-3 text-right">Acciones</th></tr></thead>
+              <tbody className="divide-y">
+                {state.mediciones.map(m => {
+                  const ruta = state.rutas.find(r => r.id === m.rutaId);
+                  const ind = state.indicadores.find(i => i.id === m.indicadorId);
+                  const stats = m.datos.estadisticas;
+                  return (
+                    <tr key={m.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-medium">{m.fecha}</td><td className="p-3 font-bold text-[#1B3A6B]">{ruta?.nombre}</td><td className="p-3"><Badge variant="blue">{m.carrilesSeleccionados.join(', ')}</Badge></td><td className="p-3">{ind?.identificador} - {ind?.nombre}</td>
+                      <td className="p-3 text-center"><Badge variant={stats.cumple_global ? 'green' : 'red'}>{stats.cumple_global ? 'CUMPLE' : 'INCUMPLE'}</Badge></td>
+                      <td className="p-3 text-right"><Button variant="ghost" size="icon" onClick={() => changeView('medicion_detalle', { medicion: m })}><Eye className="w-4 h-4 text-[#00C2D4]" /></Button><Button variant="ghost" size="icon" onClick={() => dispatch({type: 'DELETE_MEDICION', payload: m.id})}><Trash2 className="w-4 h-4 text-red-400" /></Button></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
+// --- 📐 LAYOUT PRINCIPAL Y ENRUTAMIENTO LOCAL ---
+const SidebarItem = ({ icon: Icon, label, id, current, onClick }: any) => (
+  <button onClick={() => onClick(id)} className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all ${current === id || current.startsWith(id) ? 'bg-[#1B3A6B] text-white border-r-4 border-[#00C2D4]' : 'text-slate-400 hover:bg-[#0A1628]/50 hover:text-white'}`}>
+    <Icon className={`w-5 h-5 ${current === id || current.startsWith(id) ? 'text-[#00C2D4]' : ''}`} /> {label}
+  </button>
+);
+
+const AppLayout = () => {
+  const { state, changeView } = useAppStore();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const renderContent = () => {
+    switch (state.activeModule) {
+      case 'mediciones_list': return <MedicionesListView />;
+      case 'nueva_medicion': return <NuevaMedicionWizard />;
+      case 'medicion_detalle': return <MedicionDetalleView />;
+      case 'proyectos': return <ProyectosView />;
+      case 'rutas': return <UnidadesRutasView />;
+      case 'calzadas': return <PlantillasCalzadasView />;
+      case 'indicadores': return <IndicadoresView />;
+      default: return <ProyectosView />;
+    }
+  };
+
+  return (
+    <div className="flex h-screen bg-[#F8FAFC] font-body overflow-hidden">
+      <style>{fontStyles}</style>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0A1628] text-white transform transition-transform duration-300 lg:translate-x-0 lg:static lg:flex lg:flex-col ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="h-16 flex items-center px-6 border-b border-white/10 bg-[#0A1628]">
+          <div className="flex items-center gap-2 text-[#00C2D4]">
+            <div className="w-8 h-8 rounded bg-[#1B3A6B] flex items-center justify-center font-bold">AQ</div>
+            <span className="font-heading font-bold text-lg tracking-wide text-white">AQUA<span className="text-[#00C2D4]">-Infra</span></span>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto py-4">
+           <div className="px-6 pt-2 pb-2 text-xs font-bold tracking-wider text-slate-500 uppercase">Principal</div>
+           <SidebarItem id="proyectos" icon={FolderGit2} label="Proyectos" current={state.activeModule} onClick={changeView} />
+           <SidebarItem id="rutas" icon={MapIcon} label="Unidades & Rutas" current={state.activeModule} onClick={changeView} />
+           <SidebarItem id="calzadas" icon={Layers} label="Plantillas Calzadas" current={state.activeModule} onClick={changeView} />
+           <SidebarItem id="indicadores" icon={Activity} label="Indicadores" current={state.activeModule} onClick={changeView} />
+           
+           <div className="px-6 pt-6 pb-2 text-xs font-bold tracking-wider text-[#00C2D4] uppercase">Operación Core</div>
+           <SidebarItem id="mediciones_list" icon={ClipboardList} label="Mediciones" current={state.activeModule} onClick={changeView} />
+        </div>
+      </aside>
+
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center px-4 justify-between shadow-sm shrink-0">
+          <div className="flex items-center gap-4">
+             <button className="lg:hidden" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}><Menu className="w-6 h-6" /></button>
+          </div>
+        </header>
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[#F8FAFC] p-4 lg:p-8 relative">
+          <div className="max-w-7xl mx-auto h-full">{renderContent()}</div>
+        </main>
+      </div>
+    </div>
+  );
+};
+
+// --- INICIALIZACIÓN PRINCIPAL ---
+export default function App() {
+  const [state, dispatch] = useReducer(appReducer, initialState, (initial) => {
+    try {
+      const item = window.localStorage.getItem('aqua_infra_state');
+      return item ? JSON.parse(item) : initial;
+    } catch { return initial; }
+  });
+
+  const [viewProps, setViewProps] = useState<any>({});
+  
+  const changeView = useCallback((view: string, props?: any) => {
+    setViewProps(props || {});
+    dispatch({ type: 'SET_MODULE', payload: view });
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('aqua_infra_state', JSON.stringify(state));
+    } catch (error) {
+      console.warn("Storage cap reached or error.", error);
+    }
+  }, [state]);
+
+  return (
+    <AppContext.Provider value={{ state, dispatch, changeView, viewProps }}>
+      <AppLayout />
+    </AppContext.Provider>
+  );
+}
