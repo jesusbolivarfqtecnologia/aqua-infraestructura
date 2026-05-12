@@ -21,29 +21,61 @@ function parseNum(str: string): number {
   return parseFloat(str.trim().replace(/"/g, '').replace(/,/g, '.'));
 }
 
-function splitCSV(line: string): string[] {
+function splitCSV(line: string, delimiter: string): string[] {
   const result: string[] = [];
   let inQuote = false;
   let current = '';
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
     if (c === '"') { inQuote = !inQuote; current += c; continue; }
-    if (!inQuote && (c === ',' || c === ';' || c === '\t')) { result.push(current); current = ''; continue; }
+    if (!inQuote && c === delimiter) { result.push(current); current = ''; continue; }
     current += c;
   }
   if (current.length > 0) result.push(current);
   return result.map(s => s.trim());
 }
 
+function detectDelimiter(line: string): string {
+  if (line.includes('|')) return '|';
+  if (line.includes(';')) return ';';
+  if (line.includes('\t')) return '\t';
+  return ',';
+}
+
+function validarHeader(line: string, delimiter: string): void {
+  if (delimiter === ',') {
+    const headerRegex = /^\s*"?from\s*\(m\)"?\s*,\s*"?to\s*\(m\)"?\s*,\s*"?distance\s*\(m\)"?\s*,\s*"?iri,\s*left\s*\(mm\/m\)"?\s*,\s*"?iri,\s*right\s*\(mm\/m\)"?\s*$/i;
+    if (headerRegex.test(line)) return;
+  }
+
+  const cols = splitCSV(line, delimiter);
+  if (cols.length !== 5) {
+    throw new Error('El archivo debe tener exactamente 5 columnas.');
+  }
+
+  const normalized = cols.map((c) => c.toLowerCase().replace(/\s+/g, ' ').trim());
+  const checks = [
+    normalized[0].includes('from'),
+    normalized[1].includes('to'),
+    normalized[2].includes('distance'),
+    normalized[3].includes('iri') && normalized[3].includes('left'),
+    normalized[4].includes('iri') && normalized[4].includes('right'),
+  ];
+
+  if (checks.some((ok) => !ok)) {
+    throw new Error('Encabezado invalido. Usa: "From (m), To (m), Distance (m), IRI, Left (mm/m), IRI, Right (mm/m)".');
+  }
+}
+
 export function agruparPorKm(
-  records: IRI_RegistroPuntual[],
+  records: Array<IRI_RegistroPuntual | IRI_RegistroBase>,
+  isCrudo: boolean,
   condPuntual: number,
   condMedio: number
 ): { stats: IRI_Estadisticas | null; km: IRI_ResumenKm[] } {
   if (!records || records.length === 0) return { stats: null, km: [] };
 
   let maxPuntual = -Infinity;
-  let minPuntual = Infinity;
   let fallosGlobales = 0;
   let sumMediaGlobal = 0;
   let kmFallidos = 0;
@@ -52,32 +84,54 @@ export function agruparPorKm(
   const sorted = [...records].sort((a, b) => a.from_m - b.from_m);
   let currentKmStart = sorted[0].from_m;
   let currentKmEnd = currentKmStart + 1000;
-  let currentKmRecords: IRI_RegistroPuntual[] = [];
+  let currentKmRecords: Array<IRI_RegistroPuntual | IRI_RegistroBase> = [];
 
   const processKm = () => {
     if (currentKmRecords.length === 0) return;
-    const n = currentKmRecords.length;
-    const valor_medio = currentKmRecords.reduce((s, r) => s + r.valor, 0) / n;
-    const n_incumplimientos = currentKmRecords.filter(r => !r.cumple_puntual).length;
+    let fallosKm = 0;
+    let sumKm = 0;
+
+    currentKmRecords.forEach((r) => {
+      let val = 0;
+      let isFallo = false;
+      if (isCrudo) {
+        const rr = r as IRI_RegistroBase;
+        val = Math.max(rr.iri_izq, rr.iri_der);
+        isFallo = rr.iri_izq > condPuntual || rr.iri_der > condPuntual;
+        sumKm += rr.promedio;
+      } else {
+        const rp = r as IRI_RegistroPuntual;
+        val = rp.valor;
+        isFallo = rp.valor > condPuntual;
+        sumKm += rp.valor;
+      }
+      if (val > maxPuntual) maxPuntual = val;
+      if (isFallo) fallosKm++;
+    });
+
+    const valor_medio = sumKm / currentKmRecords.length;
     const cumple_medio = valor_medio <= condMedio;
-    const cumple_km = cumple_medio && n_incumplimientos === 0;
-    const km_label = `KM ${Math.floor(currentKmStart / 1000)}`;
+    const cumple_km = cumple_medio && fallosKm === 0;
+
+    fallosGlobales += fallosKm;
+    sumMediaGlobal += valor_medio;
+    if (!cumple_km) kmFallidos++;
+
+    const kf = Math.floor(currentKmStart / 1000);
+    const rf = String(Math.round(currentKmStart % 1000)).padStart(3, '0');
+    const kt = Math.floor(currentKmEnd / 1000);
+    const rt = String(Math.round(currentKmEnd % 1000)).padStart(3, '0');
+
     combinedKm.push({
-      km_label,
+      km_label: `K${kf}+${rf} - K${kt}+${rt}`,
       from_m: currentKmStart,
       to_m: currentKmEnd,
       valor_medio,
-      n_puntuales: n,
-      n_incumplimientos,
+      n_puntuales: currentKmRecords.length,
+      n_incumplimientos: fallosKm,
       cumple_medio,
       cumple_km,
     });
-
-    // stats
-    sumMediaGlobal += valor_medio;
-    if (!cumple_km) kmFallidos++;
-    fallosGlobales += n_incumplimientos;
-    currentKmRecords = [];
   };
 
   for (let i = 0; i < sorted.length; i++) {
@@ -85,12 +139,10 @@ export function agruparPorKm(
     while (r.from_m >= currentKmEnd) {
       processKm();
       currentKmStart = currentKmEnd;
-      currentKmEnd = currentKmStart + 1000;
+      currentKmEnd += 1000;
+      currentKmRecords = [];
     }
     currentKmRecords.push(r);
-    if (r.valor > maxPuntual) maxPuntual = r.valor;
-    if (r.valor < minPuntual) minPuntual = r.valor;
-    if (!r.cumple_puntual) fallosGlobales = fallosGlobales; // counted later per km
   }
   processKm();
 
@@ -99,7 +151,7 @@ export function agruparPorKm(
     total_puntuales: records.length,
     valor_medio_global: combinedKm.length ? sumMediaGlobal / combinedKm.length : 0,
     valor_max_puntual: maxPuntual === -Infinity ? 0 : maxPuntual,
-    valor_min_puntual: minPuntual === Infinity ? 0 : minPuntual,
+    valor_min_puntual: 0,
     n_incumplimientos_puntual: fallosGlobales,
     n_km_incumplen: kmFallidos,
     porcentaje_cumplimiento: records.length ? ((records.length - fallosGlobales) / records.length) * 100 : 0,
@@ -117,27 +169,26 @@ export function parsearArchivoIRI(
   const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
   if (lines.length < 1) throw new Error('Archivo vacío o sin datos.');
 
-  let dataStartIndex = 0;
+  const delimiter = detectDelimiter(lines[0]);
+  validarHeader(lines[0], delimiter);
+
+  let dataStartIndex = 1;
   let intervalo_base_m = 20;
 
   // intentar detectar intervalo base en primeras 10 filas
-  for (let i = 0; i < Math.min(10, lines.length); i++) {
-    const cols = splitCSV(lines[i]);
+  for (let i = dataStartIndex; i < Math.min(dataStartIndex + 10, lines.length); i++) {
+    const cols = splitCSV(lines[i], delimiter);
     if (cols.length >= 5) {
       const maybeInterval = parseNum(cols[2]);
       if (!isNaN(maybeInterval) && maybeInterval > 0 && maybeInterval <= 1000) {
         intervalo_base_m = Math.round(maybeInterval);
       }
-      // considerar primera fila de datos si contiene números
-      const a = parseDistancia(cols[0]);
-      const b = parseDistancia(cols[1]);
-      if (!isNaN(a) && !isNaN(b)) { dataStartIndex = i; break; }
     }
   }
 
   const registros_base: IRI_RegistroBase[] = [];
   for (let i = dataStartIndex; i < lines.length; i++) {
-    const cols = splitCSV(lines[i]);
+    const cols = splitCSV(lines[i], delimiter);
     if (cols.length < 5) continue;
     const from_m = parseDistancia(cols[0]);
     const to_m = parseDistancia(cols[1]);
@@ -160,7 +211,11 @@ export function parsearArchivoIRI(
     registros_puntual.push({ from_m: chunk[0].from_m, to_m: chunk[chunk.length - 1].to_m, valor, cumple_puntual: valor <= condicionPuntual });
   }
 
-  const { stats, km } = agruparPorKm(registros_puntual, condicionPuntual, condicionMedio);
+  const { stats, km } = agruparPorKm(registros_puntual, false, condicionPuntual, condicionMedio);
+  if (stats) {
+    stats.total_registros_base = registros_base.length;
+    stats.total_puntuales = registros_puntual.length;
+  }
 
   const datos: DatosIRI = {
     tipo: 'IRI',

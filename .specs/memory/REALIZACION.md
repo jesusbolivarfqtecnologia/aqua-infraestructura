@@ -165,6 +165,12 @@ Database:        postgresql://postgres:postgres@127.0.0.1:54322
 - ✓ Función `agruparPorKm()` (trasladada del prototipo)
 - ✓ Retorno: `{ datos: DatosIRI; registrosBase: IRI_RegistroBase[] }`
 
+### Utils base ✓
+- ✓ `src/lib/utils/formatters.ts` (formatAbscisa, formatFecha, extractYear)
+- ✓ `src/lib/utils/colorPairs.ts` (paleta de colores)
+- ✓ `src/lib/utils/chartHelpers.ts` (getNiceMax, buildChartData100m/20m)
+- ✓ `src/lib/utils/templateDownload.ts` (descarga de plantilla IRI)
+
 ### Punto 6: API Routes iniciales ✓
 - ✓ Mediciones:
   - ✓ `GET /api/mediciones`
@@ -221,10 +227,15 @@ Database:        postgresql://postgres:postgres@127.0.0.1:54322
 - ✓ UI: `src/app/indicadores/page.tsx` con diseño del prototipo
 - ✓ Componentes: `IndicadorForm`, `IndicadorDetalle`, `CondicionesEditor`
 
+### Mediciones ✓
+- ✓ UI listado: `src/app/mediciones/page.tsx`
+- ✓ Wizard: `src/app/mediciones/nueva/page.tsx`
+- ✓ Detalle: `src/app/mediciones/[id]/page.tsx`
+- ✓ Componentes: `EstadisticasCards`, `GraficaIRI`, `GraficaBarrasKm`, `TablaResumenKm`
+- ✓ Wizard steps actualizados: `StepContexto`, `StepCarriles`, `StepCargaDatos`, `StepConfirmacion`
+
 ## 📋 PRÓXIMO
-- **Punto 6 (continuación)**: endpoints + UI para mediciones (listado + wizard)
-- **Punto 7**: componentes y layout principal (sidebar + header)
-- **Punto 8**: hooks personalizados
+- **Punto 7**: hooks personalizados (useProyectos, useMediciones, etc.)
 
 ## 🔑 Notas Importantes
 - Proyecto Next.js CREADO EN DIRECTORIO ACTUAL (no subcarpeta)
