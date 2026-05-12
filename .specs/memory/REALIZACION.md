@@ -100,32 +100,75 @@ pnpm add -D @types/papaparse supabase
 pnpm dlx shadcn@latest init --yes --defaults
 ```
 
-## 📋 PRÓXIMO: PUNTO 3 - BASE DE DATOS
+## ✅ COMPLETADO - PUNTO 3 Y 4
 
-### Punto 3: BASE DE DATOS - Crear `supabase/migrations/001_initial_schema.sql`
-**Tareas**:
-- [ ] Crear archivo: `supabase/migrations/001_initial_schema.sql`
-- [ ] Tablas: 
-  - [ ] proyectos
-  - [ ] unidades_funcionales
-  - [ ] configuracion_tags
-  - [ ] rutas
-  - [ ] indicadores
-  - [ ] mediciones
-  - [ ] mediciones_registros_base
-- [ ] Triggers para updated_at
-- [ ] Datos semilla para configuracion_tags e indicadores
-- [ ] Índices de performance
+### Punto 3: BASE DE DATOS ✓
+**Estado**: ✅ COMPLETADO
 
-### Punto 4:  TIPOS TYPESCRIPT - `src/types/index.ts`
-**Tareas**:
-- [ ] Crear archivo con interfaces de todas las entidades
-- [ ] Tipos de datos IRI (RegistroBase, RegistroPuntual, ResumenKm, Estadisticas)
-- [ ] Constantes FRECUENCIAS
-- [ ] Enums y tipos de operadores
+- ✓ `supabase init` ejecutado
+- ✓ Migración creada: `supabase/migrations/20260512195100_initial_schema.sql`
+- ✓ Tablas creadas:
+  - ✓ proyectos
+  - ✓ unidades_funcionales
+  - ✓ configuracion_tags
+  - ✓ rutas
+  - ✓ indicadores
+  - ✓ mediciones
+  - ✓ mediciones_registros_base
+- ✓ Triggers: `set_updated_at_*` para 5 tablas
+- ✓ Datos semilla:
+  - ✓ 6 configuracion_tags (DD, DI, ID, II, D, I)
+  - ✓ 1 indicador semilla (IRI - E1)
+- ✓ Índice: `idx_mediciones_registros_base_medicion`
+- ✓ Migraciones aplicadas: `supabase db reset`
+
+### Punto 4: TIPOS TYPESCRIPT ✓
+**Estado**: ✅ COMPLETADO
+
+Archivo: `src/types/index.ts` - 264 líneas
+
+- ✓ Constantes: `FRECUENCIAS` (7 frecuencias)
+- ✓ Type exports:
+  - ✓ FrecuenciaKey, OperadorCondicion, TipoCondicion, UnidadCorreccion, TipoTag
+- ✓ Interfaces entidades:
+  - ✓ Proyecto, UnidadFuncional, ConfiguracionTag, Ruta, Indicador
+- ✓ Interfaces IRI:
+  - ✓ IRI_RegistroBase, IRI_RegistroPuntual, IRI_ResumenKm, IRI_Estadisticas
+  - ✓ DatosIRI, DatosMedicionCompacta
+- ✓ Medicion (entidad)
+- ✓ DTOs para API (Create/Update para cada entidad)
+- ✓ ApiResponse genérico
+- ✓ ERROR_CODES (5 códigos de error)
+
+### Clientes Supabase ✓
+**Estado**: ✅ COMPLETADO
+
+- ✓ `src/lib/supabase/client.ts` - Cliente navegador (ssr)
+- ✓ `src/lib/supabase/server.ts` - Cliente servidor (admin)
+- ✓ `.env.local` - Variables configuradas
+- ✓ `.env.example` - Referencia para configuración
+
+### Supabase Local ✓
+**Estado**: ✅ CORRIENDO
+
+```
+Project URL:     http://127.0.0.1:54321
+Studio:          http://127.0.0.1:54323
+Database:        postgresql://postgres:postgres@127.0.0.1:54322
+```
+
+## 📋 PRÓXIMO: PUNTO 5 - LÓGICA DE NEGOCIO
+
+### Punto 5: Parser IRI
+**Ubicación**: `src/lib/parsers/iriParser.ts`
+- Función `parsearArchivoIRI()` → trasladar del prototipo fielmente
+- Función `agruparPorKm()` → trasladar del prototipo fielmente
+- Debe retornar: `{ datos: DatosIRI; registrosBase: IRI_RegistroBase[] }`
 
 ### Posteriores:
-- **Punto 5+**: API Routes, Componentes, Hooks
+- **Punto 6**: API Routes
+- **Punto 7**: Componentes React
+- **Punto 8**: Hooks personalizados
 
 ## 🔑 Notas Importantes
 - Proyecto Next.js CREADO EN DIRECTORIO ACTUAL (no subcarpeta)
