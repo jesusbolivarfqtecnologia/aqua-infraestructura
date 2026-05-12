@@ -238,7 +238,6 @@ export default function UnidadesRutasPage() {
                 ))}
               </Select>
             </div>
-            <p className="text-slate-500 text-sm mt-2">Proyecto actual: <strong className="text-[#1B3A6B]">{activeProject?.nombre}</strong></p>
           </div>
 
           <InfoBanner title="Jerarquia de Infraestructura">
