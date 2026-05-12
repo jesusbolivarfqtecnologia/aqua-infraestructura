@@ -211,8 +211,18 @@ Database:        postgresql://postgres:postgres@127.0.0.1:54322
   - ✓ `DELETE /api/rutas/[id]` (valida mediciones)
 - ✓ UI: `src/app/rutas/page.tsx` con diseño del prototipo
 
+### Indicadores ✓
+- ✓ API:
+  - ✓ `GET /api/indicadores`
+  - ✓ `POST /api/indicadores`
+  - ✓ `GET /api/indicadores/[id]`
+  - ✓ `PUT /api/indicadores/[id]`
+  - ✓ `DELETE /api/indicadores/[id]` (valida dependientes)
+- ✓ UI: `src/app/indicadores/page.tsx` con diseño del prototipo
+- ✓ Componentes: `IndicadorForm`, `IndicadorDetalle`, `CondicionesEditor`
+
 ## 📋 PRÓXIMO
-- **Punto 6 (continuación)**: endpoints + UI para indicadores
+- **Punto 6 (continuación)**: endpoints + UI para mediciones (listado + wizard)
 - **Punto 7**: componentes y layout principal (sidebar + header)
 - **Punto 8**: hooks personalizados
 
