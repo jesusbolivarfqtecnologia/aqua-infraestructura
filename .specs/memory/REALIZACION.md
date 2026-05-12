@@ -186,8 +186,17 @@ Database:        postgresql://postgres:postgres@127.0.0.1:54322
 - ✓ Layout global con fuentes Syne + DM Sans
 - ✓ Estilos globales (scrollbar + variables de color)
 
+### Plantillas de Carriles (configuracion_tags) ✓
+- ✓ API:
+  - ✓ `GET /api/configuracion-tags`
+  - ✓ `POST /api/configuracion-tags`
+  - ✓ `GET /api/configuracion-tags/[id]`
+  - ✓ `PUT /api/configuracion-tags/[id]`
+  - ✓ `DELETE /api/configuracion-tags/[id]` (valida dependientes en rutas)
+- ✓ UI: `src/app/carriles/page.tsx` con diseño del prototipo
+
 ## 📋 PRÓXIMO
-- **Punto 6 (continuación)**: endpoints + UI para unidades_funcionales, rutas, configuracion_tags e indicadores
+- **Punto 6 (continuación)**: endpoints + UI para unidades_funcionales y rutas
 - **Punto 7**: componentes y layout principal (sidebar + header)
 - **Punto 8**: hooks personalizados
 

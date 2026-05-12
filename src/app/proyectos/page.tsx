@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Map as MapIcon, Plus, Trash2 } from 'lucide-react';
+import { AppShell } from '@/components/layout';
 import { Button } from '@/components/shared/Button';
 import { Card } from '@/components/shared/Card';
 import { InfoBanner } from '@/components/shared/InfoBanner';
@@ -107,7 +108,8 @@ export default function ProyectosPage() {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <AppShell active="proyectos">
+      <div className="space-y-6 animate-in fade-in duration-300">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-heading font-bold text-[#0A1628]">Proyectos</h1>
@@ -183,6 +185,7 @@ export default function ProyectosPage() {
           </table>
         </div>
       </Card>
-    </div>
+      </div>
+    </AppShell>
   );
 }

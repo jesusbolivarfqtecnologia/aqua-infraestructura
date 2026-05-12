@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import type { ConfiguracionTag } from '@/types';
+import { AppShell } from '@/components/layout';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Card } from '@/components/shared/Card';
@@ -108,7 +109,8 @@ export default function PlantillasCalzadasPage() {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <AppShell active="carriles">
+      <div className="space-y-6 animate-in fade-in duration-300">
       <div>
         <h1 className="text-2xl font-heading font-bold text-[#0A1628]">Plantillas de Carriles</h1>
         <p className="text-slate-500 text-sm">Configuracion maestra de los tags de carriles.</p>
@@ -188,6 +190,7 @@ export default function PlantillasCalzadasPage() {
           </table>
         </div>
       </Card>
-    </div>
+      </div>
+    </AppShell>
   );
 }
