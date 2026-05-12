@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const id = params.id;
+    const { id } = await params;
     const { data, error } = await supabaseAdmin
       .from('mediciones')
       .select('*')
@@ -25,9 +25,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const id = params.id;
+    const { id } = await params;
     // eliminar registros_base primero
     await supabaseAdmin.from('mediciones_registros_base').delete().eq('medicion_id', id);
     const { error } = await supabaseAdmin.from('mediciones').delete().eq('id', id);

@@ -157,18 +157,39 @@ Studio:          http://127.0.0.1:54323
 Database:        postgresql://postgres:postgres@127.0.0.1:54322
 ```
 
-## 📋 PRÓXIMO: PUNTO 5 - LÓGICA DE NEGOCIO
+## ✅ COMPLETADO - PUNTO 5 Y 6 (PARSER + API INICIAL + UI PROYECTOS)
 
-### Punto 5: Parser IRI
+### Punto 5: Parser IRI ✓
 **Ubicación**: `src/lib/parsers/iriParser.ts`
-- Función `parsearArchivoIRI()` → trasladar del prototipo fielmente
-- Función `agruparPorKm()` → trasladar del prototipo fielmente
-- Debe retornar: `{ datos: DatosIRI; registrosBase: IRI_RegistroBase[] }`
+- ✓ Función `parsearArchivoIRI()` (trasladada del prototipo)
+- ✓ Función `agruparPorKm()` (trasladada del prototipo)
+- ✓ Retorno: `{ datos: DatosIRI; registrosBase: IRI_RegistroBase[] }`
 
-### Posteriores:
-- **Punto 6**: API Routes
-- **Punto 7**: Componentes React
-- **Punto 8**: Hooks personalizados
+### Punto 6: API Routes iniciales ✓
+- ✓ Mediciones:
+  - ✓ `GET /api/mediciones`
+  - ✓ `POST /api/mediciones` (inserta registros_base en bulk)
+  - ✓ `GET /api/mediciones/[id]` (incluye registros_base)
+  - ✓ `DELETE /api/mediciones/[id]`
+- ✓ Proyectos:
+  - ✓ `GET /api/proyectos`
+  - ✓ `POST /api/proyectos`
+  - ✓ `GET /api/proyectos/[id]`
+  - ✓ `PUT /api/proyectos/[id]`
+  - ✓ `DELETE /api/proyectos/[id]` (valida dependientes)
+
+### UI Proyectos (alineada al prototipo) ✓
+- ✓ `src/app/proyectos/page.tsx` con diseño base del prototipo
+- ✓ Componentes shared creados:
+  - `Button`, `Input`, `Select`, `Textarea`, `Card`, `Badge`, `InfoBanner`, `InlineEdit`,
+    `TagMultiSelect`, `SlidePanel`, `ConfirmDialog`, `PageHeader`, `EmptyState`
+- ✓ Layout global con fuentes Syne + DM Sans
+- ✓ Estilos globales (scrollbar + variables de color)
+
+## 📋 PRÓXIMO
+- **Punto 6 (continuación)**: endpoints + UI para unidades_funcionales, rutas, configuracion_tags e indicadores
+- **Punto 7**: componentes y layout principal (sidebar + header)
+- **Punto 8**: hooks personalizados
 
 ## 🔑 Notas Importantes
 - Proyecto Next.js CREADO EN DIRECTORIO ACTUAL (no subcarpeta)

@@ -128,3 +128,18 @@
     @apply font-sans;
   }
 }
+
+:root {
+  --aqua-dark: #0A1628;
+  --aqua-blue: #1B3A6B;
+  --aqua-cyan: #00C2D4;
+  --aqua-bg: #F8FAFC;
+}
+
+.font-heading { font-family: var(--font-heading); }
+.font-body { font-family: var(--font-body); }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
