@@ -185,6 +185,7 @@ Database:        postgresql://postgres:postgres@127.0.0.1:54322
     `TagMultiSelect`, `SlidePanel`, `ConfirmDialog`, `PageHeader`, `EmptyState`
 - ✓ Layout global con fuentes Syne + DM Sans
 - ✓ Estilos globales (scrollbar + variables de color)
+- ✓ AppShell con sidebar colapsable (mobile) y header
 
 ### Plantillas de Carriles (configuracion_tags) ✓
 - ✓ API:
@@ -195,8 +196,23 @@ Database:        postgresql://postgres:postgres@127.0.0.1:54322
   - ✓ `DELETE /api/configuracion-tags/[id]` (valida dependientes en rutas)
 - ✓ UI: `src/app/carriles/page.tsx` con diseño del prototipo
 
+### Unidades Funcionales & Rutas ✓
+- ✓ API Unidades:
+  - ✓ `GET /api/unidades-funcionales` (filtro por proyecto)
+  - ✓ `POST /api/unidades-funcionales`
+  - ✓ `GET /api/unidades-funcionales/[id]`
+  - ✓ `PUT /api/unidades-funcionales/[id]`
+  - ✓ `DELETE /api/unidades-funcionales/[id]` (valida dependientes)
+- ✓ API Rutas:
+  - ✓ `GET /api/rutas` (filtro por UF)
+  - ✓ `POST /api/rutas`
+  - ✓ `GET /api/rutas/[id]`
+  - ✓ `PUT /api/rutas/[id]`
+  - ✓ `DELETE /api/rutas/[id]` (valida mediciones)
+- ✓ UI: `src/app/rutas/page.tsx` con diseño del prototipo
+
 ## 📋 PRÓXIMO
-- **Punto 6 (continuación)**: endpoints + UI para unidades_funcionales y rutas
+- **Punto 6 (continuación)**: endpoints + UI para indicadores
 - **Punto 7**: componentes y layout principal (sidebar + header)
 - **Punto 8**: hooks personalizados
 
