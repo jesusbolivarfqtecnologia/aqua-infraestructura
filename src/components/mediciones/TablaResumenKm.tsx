@@ -4,7 +4,15 @@ import type { IRI_ResumenKm } from '@/types';
 import { Badge } from '@/components/shared/Badge';
 import { Card } from '@/components/shared/Card';
 
-export function TablaResumenKm({ data, viewMode }: { data: IRI_ResumenKm[]; viewMode: '100m' | '20m' }) {
+export function TablaResumenKm({
+  data,
+  viewMode,
+  onRowClick,
+}: {
+  data: IRI_ResumenKm[];
+  viewMode: '100m' | '20m';
+  onRowClick: (payload: IRI_ResumenKm) => void;
+}) {
   return (
     <Card className="lg:col-span-2 flex flex-col overflow-hidden">
       <div className="p-3 border-b flex justify-between items-center bg-slate-50">
@@ -23,7 +31,11 @@ export function TablaResumenKm({ data, viewMode }: { data: IRI_ResumenKm[]; view
           </thead>
           <tbody className="divide-y">
             {data.map((km, i) => (
-              <tr key={i} className={!km.cumple_km ? 'bg-red-50/40' : ''}>
+              <tr
+                key={i}
+                className={`${!km.cumple_km ? 'bg-red-50/40' : ''} cursor-pointer hover:bg-slate-50`}
+                onClick={() => onRowClick(km)}
+              >
                 <td className="p-3 font-medium">{km.km_label}</td>
                 <td className="p-3 font-bold">{km.valor_medio.toFixed(2)}</td>
                 <td className="p-3 text-center">

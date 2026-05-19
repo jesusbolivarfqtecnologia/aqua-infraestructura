@@ -6,7 +6,6 @@ import { AlertTriangle } from 'lucide-react';
 import type {
   Indicador,
   IRI_RegistroBase,
-  IRI_ResumenKm,
   Medicion,
   Proyecto,
   RegistrosBasePayload,
@@ -268,6 +267,42 @@ export default function MedicionDetallePage() {
   const activeStats = viewMode === '20m' && baseSummary.stats ? baseSummary.stats : medicion?.datos.estadisticas;
   const activeKm = viewMode === '20m' && baseSummary.km.length > 0 ? baseSummary.km : medicion?.datos.resumen_km || [];
 
+  const barChartData = useMemo(() => {
+    const active = medicionesConLabel.filter((m) => selectedMedIds.includes(m.id));
+    if (active.length === 0) return { data: [], series: [] as Array<{ id: string; label: string; color: string }> };
+
+    const series = active.map((m, idx) => {
+      const year = extractYear(m.fecha);
+      const pair = year ? yearColorMap[year] : null;
+      const fallback = COLOR_PAIRS[idx % COLOR_PAIRS.length];
+      return {
+        id: m.id,
+        label: m.label,
+        color: pair?.der || fallback?.der || '#0ea5e9',
+      };
+    });
+
+    const rowMap = new Map<number, { km_label: string; from_m: number; to_m: number } & Record<string, number | boolean | string | undefined>>();
+
+    active.forEach((m) => {
+      const summary = viewMode === '20m'
+        ? agruparPorKm(registrosBaseMap[m.id] || [], true, condPuntual, condMedio).km
+        : m.datos.resumen_km || [];
+
+      summary.forEach((km) => {
+        const key = km.from_m;
+        const existing = rowMap.get(key);
+        const row = existing ?? { km_label: km.km_label, from_m: km.from_m, to_m: km.to_m };
+        row[m.id] = km.valor_medio;
+        row[`${m.id}_cumple`] = km.cumple_medio;
+        rowMap.set(key, row);
+      });
+    });
+
+    const data = Array.from(rowMap.values()).sort((a, b) => a.from_m - b.from_m);
+    return { data, series };
+  }, [medicionesConLabel, selectedMedIds, viewMode, registrosBaseMap, condPuntual, condMedio, yearColorMap]);
+
   useEffect(() => {
     if (viewMode !== '20m') return;
     if (brushIndexes || chartData20m.length <= 400) return;
@@ -278,10 +313,9 @@ export default function MedicionDetallePage() {
     setSelectedMedIds((prev) => (prev.includes(mid) ? prev.filter((x) => x !== mid) : [...prev, mid]));
   };
 
-  const handleBarClick = (evt: any) => {
-    const payload = evt?.activePayload?.[0]?.payload;
+  const handleBarClick = (payload: { from_m: number; to_m: number }) => {
     if (!payload) return;
-    const { from_m, to_m } = payload as { from_m: number; to_m: number };
+    const { from_m, to_m } = payload;
     const data = viewMode === '20m' ? chartData20m : chartData100m;
     if (data.length === 0) return;
 
@@ -396,14 +430,15 @@ export default function MedicionDetallePage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <GraficaBarrasKm
-            data={activeKm}
+            data={barChartData.data}
+            series={barChartData.series}
             condMedio={condMedio}
             unidad={unidad}
             onBarClick={handleBarClick}
             fullscreen={fullscreenChart === 'bar'}
             setFullscreen={(val) => setFullscreenChart(val ? 'bar' : null)}
           />
-          <TablaResumenKm data={activeKm} viewMode={viewMode} />
+          <TablaResumenKm data={activeKm} viewMode={viewMode} onRowClick={handleBarClick} />
         </div>
 
         <div className="flex justify-end">

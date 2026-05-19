@@ -58,6 +58,10 @@ export function GraficaIRI({
 }) {
   const dense100m = chartData100m.length > 800;
   const dense20m = chartData20m.length > 1200;
+  const [showLeft, setShowLeft] = React.useState(true);
+  const [showRight, setShowRight] = React.useState(true);
+  const brushFrame = React.useRef<number | null>(null);
+  const pendingBrush = React.useRef<{ startIndex: number; endIndex: number } | null>(null);
 
   const CustomDot100m = (props: any) => {
     const { cx, cy, value, stroke } = props;
@@ -73,10 +77,33 @@ export function GraficaIRI({
     return null;
   };
 
+  const scheduleBrushUpdate = React.useCallback(
+    (next: { startIndex: number; endIndex: number }) => {
+      pendingBrush.current = next;
+      if (brushFrame.current != null) return;
+      brushFrame.current = requestAnimationFrame(() => {
+        brushFrame.current = null;
+        const pending = pendingBrush.current;
+        if (!pending) return;
+        pendingBrush.current = null;
+        setBrushIndexes((prev) => {
+          if (prev && prev.startIndex === pending.startIndex && prev.endIndex === pending.endIndex) return prev;
+          return pending;
+        });
+      });
+    },
+    [setBrushIndexes]
+  );
+
+  React.useEffect(() => {
+    return () => {
+      if (brushFrame.current != null) cancelAnimationFrame(brushFrame.current);
+    };
+  }, []);
+
   const handleBrushChange = (e: any) => {
-    if (!e) return;
-    if (brushIndexes && brushIndexes.startIndex === e.startIndex && brushIndexes.endIndex === e.endIndex) return;
-    setBrushIndexes({ startIndex: e.startIndex, endIndex: e.endIndex });
+    if (!e || typeof e.startIndex !== 'number' || typeof e.endIndex !== 'number') return;
+    scheduleBrushUpdate({ startIndex: e.startIndex, endIndex: e.endIndex });
   };
 
   return (
@@ -97,6 +124,22 @@ export function GraficaIRI({
             <button className={`px-3 py-1 text-xs rounded transition-all ${viewMode === '100m' ? 'bg-white shadow text-[#00C2D4] font-semibold' : 'text-slate-500'}`} onClick={() => setViewMode('100m')}>Puntual (100m)</button>
             <button className={`px-3 py-1 text-xs rounded transition-all ${viewMode === '20m' ? 'bg-white shadow text-[#00C2D4] font-semibold' : 'text-slate-500'}`} onClick={() => setViewMode('20m')}>Crudo (20m) {isLoadingBase && '...'}</button>
           </div>
+          {viewMode === '20m' && (
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-md">
+              <button
+                className={`px-3 py-1 text-xs rounded transition-all ${showLeft ? 'bg-white shadow text-[#0A1628] font-semibold' : 'text-slate-400'}`}
+                onClick={() => setShowLeft((prev) => !prev)}
+              >
+                Izq
+              </button>
+              <button
+                className={`px-3 py-1 text-xs rounded transition-all ${showRight ? 'bg-white shadow text-[#0A1628] font-semibold' : 'text-slate-400'}`}
+                onClick={() => setShowRight((prev) => !prev)}
+              >
+                Der
+              </button>
+            </div>
+          )}
           <Button variant="ghost" size="sm" onClick={() => setFullscreenChart(fullscreenChart === 'line' ? null : 'line')} className="h-7 text-xs text-slate-500 hover:text-slate-800 shrink-0">
             {fullscreenChart === 'line' ? <><Minimize className="w-3 h-3 mr-1" /> Salir</> : <><Maximize className="w-3 h-3 mr-1" /> Pantalla Completa</>}
           </Button>
@@ -117,7 +160,7 @@ export function GraficaIRI({
             <div className="flex items-center justify-center h-full text-slate-400">Selecciona al menos un tramo para visualizar la grafica.</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={chartData100m} margin={{ top: 10, right: 30, left: 10, bottom: 20 }}>
+              <ComposedChart data={chartData100m} margin={{ top: 10, right: 30, left: 30, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="abscisa" tickFormatter={formatAbscisa} tick={{ fontSize: 11, fill: '#64748b' }} minTickGap={60} />
                 <YAxis domain={[0, maxDomain100m]} tick={{ fontSize: 11, fill: '#64748b' }} />
@@ -140,7 +183,13 @@ export function GraficaIRI({
                   onChange={handleBrushChange}
                 />
                 <ReferenceArea y1={condPuntual} y2={maxDomain100m} fill="#fee2e2" fillOpacity={0.4} />
-                <ReferenceLine y={condPuntual} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: `Limite ${condPuntual}`, position: 'insideTopRight', fontSize: 11, fill: '#ef4444' }} />
+                <ReferenceLine
+                  y={condPuntual}
+                  stroke="#ef4444"
+                  strokeDasharray="6 3"
+                  strokeWidth={1.5}
+                  label={{ value: `Limite ${condPuntual}`, position: 'left', offset: 12, fontSize: 11, fill: '#ef4444' }}
+                />
                 {medicionesConLabel.filter((m) => selectedMedIds.includes(m.id)).map((mObj) => {
                   const year = mObj.fecha.substring(0, 4);
                   const colorBase = yearColorMap[year]?.der || '#000';
@@ -173,9 +222,11 @@ export function GraficaIRI({
         <div className={fullscreenChart === 'line' ? 'flex-1 w-full min-h-0' : 'h-[450px] w-full'}>
           {selectedMedIds.length === 0 ? (
             <div className="flex items-center justify-center h-full text-slate-400">Selecciona al menos un tramo para visualizar la grafica.</div>
+          ) : !showLeft && !showRight ? (
+            <div className="flex items-center justify-center h-full text-slate-400">Activa Izq o Der para visualizar la grafica.</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={chartData20m} margin={{ top: 10, right: 30, left: 10, bottom: 20 }}>
+              <ComposedChart data={chartData20m} margin={{ top: 10, right: 30, left: 30, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="abscisa" tickFormatter={formatAbscisa} tick={{ fontSize: 11 }} minTickGap={60} />
                 <YAxis domain={[0, maxDomain20m]} tick={{ fontSize: 11 }} />
@@ -194,35 +245,45 @@ export function GraficaIRI({
                   onChange={handleBrushChange}
                 />
                 <ReferenceArea y1={condPuntual} y2={maxDomain20m} fill="#fee2e2" fillOpacity={0.4} />
-                <ReferenceLine y={condPuntual} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: `Limite ${condPuntual}`, position: 'insideTopRight', fontSize: 11, fill: '#ef4444' }} />
+                <ReferenceLine
+                  y={condPuntual}
+                  stroke="#ef4444"
+                  strokeDasharray="6 3"
+                  strokeWidth={1.5}
+                  label={{ value: `Limite ${condPuntual}`, position: 'left', offset: 12, fontSize: 11, fill: '#ef4444' }}
+                />
                 {medicionesConLabel.filter((m) => selectedMedIds.includes(m.id)).map((mObj) => {
                   const year = mObj.fecha.substring(0, 4);
                   const pair = yearColorMap[year] || { izq: '#60a5fa', der: '#1d4ed8' };
                   return (
                     <React.Fragment key={mObj.id}>
-                      <Line
-                        type="monotone"
-                        dataKey={`${mObj.id}_izq`}
-                        name={`Medicion Izquierda - ${mObj.label}`}
-                        stroke={pair.izq}
-                        strokeWidth={2}
-                        isAnimationActive={false}
-                        dot={dense20m ? false : <CustomDot20m />}
-                        activeDot={dense20m ? false : { r: 4 }}
-                        connectNulls={false}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey={`${mObj.id}_der`}
-                        name={`Medicion Derecha - ${mObj.label}`}
-                        stroke={pair.der}
-                        strokeWidth={2}
-                        strokeDasharray="4 4"
-                        isAnimationActive={false}
-                        dot={dense20m ? false : <CustomDot20m />}
-                        activeDot={dense20m ? false : { r: 4 }}
-                        connectNulls={false}
-                      />
+                      {showLeft && (
+                        <Line
+                          type="monotone"
+                          dataKey={`${mObj.id}_izq`}
+                          name={`Medicion Izquierda - ${mObj.label}`}
+                          stroke={pair.izq}
+                          strokeWidth={2}
+                          isAnimationActive={false}
+                          dot={dense20m ? false : <CustomDot20m />}
+                          activeDot={dense20m ? false : { r: 4 }}
+                          connectNulls={false}
+                        />
+                      )}
+                      {showRight && (
+                        <Line
+                          type="monotone"
+                          dataKey={`${mObj.id}_der`}
+                          name={`Medicion Derecha - ${mObj.label}`}
+                          stroke={pair.der}
+                          strokeWidth={2}
+                          strokeDasharray="4 4"
+                          isAnimationActive={false}
+                          dot={dense20m ? false : <CustomDot20m />}
+                          activeDot={dense20m ? false : { r: 4 }}
+                          connectNulls={false}
+                        />
+                      )}
                     </React.Fragment>
                   );
                 })}
