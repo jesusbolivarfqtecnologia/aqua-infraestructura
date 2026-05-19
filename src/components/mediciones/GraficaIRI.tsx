@@ -56,6 +56,9 @@ export function GraficaIRI({
   setFullscreenChart: (val: 'line' | 'bar' | null) => void;
   unidad: string;
 }) {
+  const dense100m = chartData100m.length > 800;
+  const dense20m = chartData20m.length > 1200;
+
   const CustomDot100m = (props: any) => {
     const { cx, cy, value, stroke } = props;
     if (value == null || cx == null || cy == null) return null;
@@ -68,6 +71,12 @@ export function GraficaIRI({
     if (value == null || cx == null || cy == null) return null;
     if (value > condPuntual) return <circle cx={cx} cy={cy} r={4} fill="#ef4444" stroke="none" />;
     return null;
+  };
+
+  const handleBrushChange = (e: any) => {
+    if (!e) return;
+    if (brushIndexes && brushIndexes.startIndex === e.startIndex && brushIndexes.endIndex === e.endIndex) return;
+    setBrushIndexes({ startIndex: e.startIndex, endIndex: e.endIndex });
   };
 
   return (
@@ -128,7 +137,7 @@ export function GraficaIRI({
                   tickFormatter={formatAbscisa}
                   startIndex={brushIndexes ? brushIndexes.startIndex : 0}
                   endIndex={brushIndexes ? brushIndexes.endIndex : chartData100m.length - 1}
-                  onChange={(e: any) => setBrushIndexes({ startIndex: e.startIndex, endIndex: e.endIndex })}
+                  onChange={handleBrushChange}
                 />
                 <ReferenceArea y1={condPuntual} y2={maxDomain100m} fill="#fee2e2" fillOpacity={0.4} />
                 <ReferenceLine y={condPuntual} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: `Limite ${condPuntual}`, position: 'insideTopRight', fontSize: 11, fill: '#ef4444' }} />
@@ -143,8 +152,9 @@ export function GraficaIRI({
                       name={mObj.id}
                       stroke={colorBase}
                       strokeWidth={2.5}
-                      dot={<CustomDot100m />}
-                      activeDot={{ r: 6, strokeWidth: 2 }}
+                      isAnimationActive={false}
+                      dot={dense100m ? false : <CustomDot100m />}
+                      activeDot={dense100m ? false : { r: 6, strokeWidth: 2 }}
                       connectNulls={false}
                     />
                   );
@@ -181,7 +191,7 @@ export function GraficaIRI({
                   tickFormatter={formatAbscisa}
                   startIndex={brushIndexes ? brushIndexes.startIndex : 0}
                   endIndex={brushIndexes ? brushIndexes.endIndex : chartData20m.length - 1}
-                  onChange={(e: any) => setBrushIndexes({ startIndex: e.startIndex, endIndex: e.endIndex })}
+                  onChange={handleBrushChange}
                 />
                 <ReferenceArea y1={condPuntual} y2={maxDomain20m} fill="#fee2e2" fillOpacity={0.4} />
                 <ReferenceLine y={condPuntual} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: `Limite ${condPuntual}`, position: 'insideTopRight', fontSize: 11, fill: '#ef4444' }} />
@@ -190,8 +200,29 @@ export function GraficaIRI({
                   const pair = yearColorMap[year] || { izq: '#60a5fa', der: '#1d4ed8' };
                   return (
                     <React.Fragment key={mObj.id}>
-                      <Line type="monotone" dataKey={`${mObj.id}_izq`} name={`Medicion Izquierda - ${mObj.label}`} stroke={pair.izq} strokeWidth={2} dot={<CustomDot20m />} activeDot={{ r: 4 }} connectNulls={false} />
-                      <Line type="monotone" dataKey={`${mObj.id}_der`} name={`Medicion Derecha - ${mObj.label}`} stroke={pair.der} strokeWidth={2} strokeDasharray="4 4" dot={<CustomDot20m />} activeDot={{ r: 4 }} connectNulls={false} />
+                      <Line
+                        type="monotone"
+                        dataKey={`${mObj.id}_izq`}
+                        name={`Medicion Izquierda - ${mObj.label}`}
+                        stroke={pair.izq}
+                        strokeWidth={2}
+                        isAnimationActive={false}
+                        dot={dense20m ? false : <CustomDot20m />}
+                        activeDot={dense20m ? false : { r: 4 }}
+                        connectNulls={false}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey={`${mObj.id}_der`}
+                        name={`Medicion Derecha - ${mObj.label}`}
+                        stroke={pair.der}
+                        strokeWidth={2}
+                        strokeDasharray="4 4"
+                        isAnimationActive={false}
+                        dot={dense20m ? false : <CustomDot20m />}
+                        activeDot={dense20m ? false : { r: 4 }}
+                        connectNulls={false}
+                      />
                     </React.Fragment>
                   );
                 })}

@@ -42,7 +42,7 @@ export function GraficaBarrasKm({
               <RechartsTooltip formatter={(v: any) => [`${Number(v).toFixed(2)} ${unidad}`, 'Valor medio']} cursor={{ fill: 'transparent' }} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
               <ReferenceLine y={condMedio} stroke="#f59e0b" strokeDasharray="4 2" />
               <Brush dataKey="km_label" height={30} stroke="#00C2D4" tickFormatter={(val) => val.split(' ')[0]} />
-              <Bar dataKey="valor_medio" radius={[3, 3, 0, 0]} className="cursor-pointer hover:opacity-80 transition-opacity">
+              <Bar dataKey="valor_medio" radius={[3, 3, 0, 0]} isAnimationActive={false} className="cursor-pointer hover:opacity-80 transition-opacity">
                 {data.map((entry, index) => (
                   <Cell key={index} fill={entry.cumple_medio ? '#10b981' : '#ef4444'} />
                 ))}
