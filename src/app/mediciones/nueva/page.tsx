@@ -183,6 +183,8 @@ export default function NuevaMedicionPage() {
     setError(null);
     try {
       for (const carril of seleccionados) {
+        const headers = ['from_m', 'to_m', 'iri_izq', 'iri_der', 'promedio'];
+        const data = parsedData.registrosBase.map((r) => [r.from_m, r.to_m, r.iri_izq, r.iri_der, r.promedio]);
         const payload = {
           proyecto_id: form.proyecto_id,
           unidad_funcional_id: form.uf_id,
@@ -192,7 +194,7 @@ export default function NuevaMedicionPage() {
           fecha: form.fecha,
           datos: parsedData.datos,
           tiene_datos_base: true,
-          registros_base: parsedData.registrosBase,
+          registros_base: { headers, data },
         };
         const res = await fetch('/api/mediciones', {
           method: 'POST',

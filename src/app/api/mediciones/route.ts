@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import type { CreateMedicionDTO } from '@/types';
+import type { CreateMedicionDTO, RegistrosBasePayload } from '@/types';
 
 export async function GET() {
   try {
@@ -17,7 +17,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as CreateMedicionDTO & { registros_base?: any[] };
+    const body = (await req.json()) as CreateMedicionDTO & { registros_base?: RegistrosBasePayload };
+    const hasBase = !!(body.registros_base && Array.isArray(body.registros_base.data) && body.registros_base.data.length);
     // Inserta la medición (sin registros_base)
     const { data: created, error: errCreate } = await supabaseAdmin
       .from('mediciones')
@@ -29,25 +30,23 @@ export async function POST(req: Request) {
         indicador_id: body.indicador_id,
         fecha: body.fecha,
         datos: body.datos,
-        tiene_datos_base: !!(body.registros_base && body.registros_base.length),
+        tiene_datos_base: hasBase,
       }])
       .select()
       .single();
 
     if (errCreate) return NextResponse.json({ error: { code: 'INTERNAL_ERROR', message: errCreate.message } }, { status: 500 });
 
-    // Si hay registros base, insertarlos en bulk
-    if (body.registros_base && body.registros_base.length && created?.id) {
-      const rows = body.registros_base.map(r => ({
-        medicion_id: created.id,
-        from_m: r.from_m,
-        to_m: r.to_m,
-        iri_izq: r.iri_izq,
-        iri_der: r.iri_der,
-      }));
+    // Si hay registros base, insertarlos en una sola fila
+    if (hasBase && created?.id && body.registros_base) {
+      const { headers = [], data = [] } = body.registros_base;
       const { error: errBulk } = await supabaseAdmin
         .from('mediciones_registros_base')
-        .insert(rows);
+        .insert([{
+          medicion_id: created.id,
+          headers,
+          data,
+        }]);
       if (errBulk) {
         return NextResponse.json({ error: { code: 'INTERNAL_ERROR', message: errBulk.message } }, { status: 500 });
       }

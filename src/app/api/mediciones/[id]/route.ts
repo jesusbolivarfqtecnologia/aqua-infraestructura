@@ -11,15 +11,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       .single();
     if (error) return NextResponse.json({ error: { code: 'NOT_FOUND', message: error.message } }, { status: 404 });
 
-    // traer registros_base
+    // traer registros_base (headers + data)
     const { data: registros, error: err2 } = await supabaseAdmin
       .from('mediciones_registros_base')
-      .select('*')
-      .eq('medicion_id', id)
-      .order('from_m', { ascending: true });
+      .select('headers, data')
+      .eq('medicion_id', id);
     if (err2) return NextResponse.json({ error: { code: 'INTERNAL_ERROR', message: err2.message } }, { status: 500 });
+    const registroBase = registros && registros.length > 0 ? registros[0] : null;
 
-    return NextResponse.json({ data: { medicion: data, registros_base: registros } }, { status: 200 });
+    return NextResponse.json({ data: { medicion: data, registros_base: registroBase } }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: { code: 'INTERNAL_ERROR', message: e.message } }, { status: 500 });
   }

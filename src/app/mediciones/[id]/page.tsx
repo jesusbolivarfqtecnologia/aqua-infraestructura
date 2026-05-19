@@ -9,6 +9,7 @@ import type {
   IRI_ResumenKm,
   Medicion,
   Proyecto,
+  RegistrosBasePayload,
   Ruta,
   UnidadFuncional,
 } from '@/types';
@@ -21,6 +22,81 @@ import { agruparPorKm } from '@/lib/parsers/iriParser';
 import { buildChartData100m, buildChartData20m, getNiceMax } from '@/lib/utils/chartHelpers';
 import { COLOR_PAIRS } from '@/lib/utils/colorPairs';
 import { extractYear, formatAbscisa, formatFecha } from '@/lib/utils/formatters';
+
+const normalizeHeader = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[()]/g, '')
+    .replace(/,+/g, '')
+    .replace(/[^a-z0-9_]/g, '');
+
+const headerIndex = (headers: string[], key: string) => {
+  const normalizedHeaders = headers.map(normalizeHeader);
+  return normalizedHeaders.indexOf(normalizeHeader(key));
+};
+
+const toNumber = (value: unknown) => {
+  if (typeof value === 'number') return value;
+  const parsed = Number(String(value ?? '').replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : NaN;
+};
+
+const buildIriRecord = (
+  from_m: number,
+  to_m: number,
+  iri_izq: number,
+  iri_der: number,
+  promedio: number
+): IRI_RegistroBase | null => {
+  if (!Number.isFinite(from_m) || !Number.isFinite(to_m) || !Number.isFinite(iri_izq) || !Number.isFinite(iri_der)) return null;
+  const avg = Number.isFinite(promedio) ? promedio : (iri_izq + iri_der) / 2;
+  return { from_m, to_m, iri_izq, iri_der, promedio: avg };
+};
+
+const parseRegistrosBase = (payload: unknown): IRI_RegistroBase[] => {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload as IRI_RegistroBase[];
+
+  const typed = payload as RegistrosBasePayload;
+  const headers = Array.isArray(typed.headers) ? typed.headers.map((h) => String(h)) : [];
+  const data = Array.isArray(typed.data) ? typed.data : [];
+  if (!headers.length || !data.length) return [];
+
+  const idxFrom = headerIndex(headers, 'from_m');
+  const idxTo = headerIndex(headers, 'to_m');
+  const idxIzq = headerIndex(headers, 'iri_izq');
+  const idxDer = headerIndex(headers, 'iri_der');
+  const idxProm = headerIndex(headers, 'promedio');
+  if (idxFrom < 0 || idxTo < 0 || idxIzq < 0 || idxDer < 0) return [];
+
+  return data
+    .map((row) => {
+      if (Array.isArray(row)) {
+        return buildIriRecord(
+          toNumber(row[idxFrom]),
+          toNumber(row[idxTo]),
+          toNumber(row[idxIzq]),
+          toNumber(row[idxDer]),
+          idxProm >= 0 ? toNumber(row[idxProm]) : NaN
+        );
+      }
+
+      if (row && typeof row === 'object') {
+        const record = row as Record<string, unknown>;
+        return buildIriRecord(
+          toNumber(record.from_m),
+          toNumber(record.to_m),
+          toNumber(record.iri_izq),
+          toNumber(record.iri_der),
+          toNumber(record.promedio)
+        );
+      }
+
+      return null;
+    })
+    .filter((r): r is IRI_RegistroBase => !!r);
+};
 
 export default function MedicionDetallePage() {
   const params = useParams<{ id: string }>();
@@ -52,7 +128,7 @@ export default function MedicionDetallePage() {
         if (json.error) throw new Error(json.error.message || 'Error al cargar medicion');
 
         const med = json.data?.medicion as Medicion;
-        const registros = (json.data?.registros_base || []) as IRI_RegistroBase[];
+        const registros = parseRegistrosBase(json.data?.registros_base);
 
         setMedicion(med);
         setRegistrosBaseMap({ [id]: registros });
@@ -104,7 +180,7 @@ export default function MedicionDetallePage() {
           missing.map(async (mid) => {
             const res = await fetch(`/api/mediciones/${mid}`);
             const json = await res.json();
-            if (json.data?.registros_base) return [mid, json.data.registros_base as IRI_RegistroBase[]] as const;
+            if (json.data?.registros_base) return [mid, parseRegistrosBase(json.data.registros_base)] as const;
             return null;
           })
         );

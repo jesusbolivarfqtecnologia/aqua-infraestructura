@@ -99,17 +99,14 @@ CREATE TABLE mediciones (
 CREATE TABLE mediciones_registros_base (
   id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   medicion_id  UUID NOT NULL REFERENCES mediciones(id),
-  -- Un registro por fila del CSV (20m)
-  from_m       NUMERIC NOT NULL,
-  to_m         NUMERIC NOT NULL,
-  iri_izq      NUMERIC NOT NULL,
-  iri_der      NUMERIC NOT NULL,
-  promedio     NUMERIC NOT NULL GENERATED ALWAYS AS ((iri_izq + iri_der) / 2) STORED
+  -- Un registro por medicion con estructura variable
+  headers      JSONB NOT NULL DEFAULT '[]'::jsonb,
+  data         JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
 -- Índice para consultas rápidas por medición
-CREATE INDEX idx_mediciones_registros_base_medicion
-  ON mediciones_registros_base(medicion_id, from_m);
+CREATE UNIQUE INDEX idx_mediciones_registros_base_medicion
+  ON mediciones_registros_base(medicion_id);
 
 -- ============================================================
 -- TRIGGERS: updated_at automático

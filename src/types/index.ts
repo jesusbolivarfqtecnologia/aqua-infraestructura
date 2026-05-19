@@ -138,6 +138,11 @@ export interface DatosIRI {
 // DatosIRI sin registros_base → lo que se guarda en `mediciones.datos`
 export type DatosMedicionCompacta = DatosIRI;
 
+export type RegistrosBasePayload = {
+  headers: string[];
+  data: unknown[];
+};
+
 // ============================================================
 // ENTIDAD: MEDICIÓN
 // ============================================================
@@ -184,7 +189,7 @@ export type CreateMedicionDTO = {
   fecha:                  string;
   datos:                  DatosMedicionCompacta;
   tiene_datos_base:       boolean;
-  registros_base?:        IRI_RegistroBase[];
+  registros_base?:        RegistrosBasePayload;
 };
 
 // ============================================================
