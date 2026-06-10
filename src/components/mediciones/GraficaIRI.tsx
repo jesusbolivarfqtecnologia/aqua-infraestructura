@@ -51,7 +51,7 @@ export function GraficaIRI({
   maxDomain20m: number;
   formatAbscisa: (val: number) => string;
   brushIndexes: { startIndex: number; endIndex: number } | null;
-  setBrushIndexes: (val: { startIndex: number; endIndex: number } | null) => void;
+  setBrushIndexes: React.Dispatch<React.SetStateAction<{ startIndex: number; endIndex: number } | null>>;
   fullscreenChart: 'line' | 'bar' | null;
   setFullscreenChart: (val: 'line' | 'bar' | null) => void;
   unidad: string;

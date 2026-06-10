@@ -6,6 +6,7 @@ import { AlertTriangle } from 'lucide-react';
 import type {
   Indicador,
   IRI_RegistroBase,
+  IRI_ResumenKm,
   Medicion,
   Proyecto,
   RegistrosBasePayload,
