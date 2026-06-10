@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- TABLA: proyectos
 -- ============================================================
 CREATE TABLE proyectos (
-  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id          UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
   nombre      TEXT NOT NULL CHECK (char_length(trim(nombre)) > 0),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -17,7 +17,7 @@ CREATE TABLE proyectos (
 -- TABLA: unidades_funcionales
 -- ============================================================
 CREATE TABLE unidades_funcionales (
-  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id           UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
   nombre       TEXT NOT NULL CHECK (char_length(trim(nombre)) > 0),
   proyecto_id  UUID NOT NULL REFERENCES proyectos(id),
   -- ⚠️ NO usar ON DELETE CASCADE: la eliminación se controla desde el backend
@@ -29,7 +29,7 @@ CREATE TABLE unidades_funcionales (
 -- TABLA: configuracion_tags (catálogo de carriles)
 -- ============================================================
 CREATE TABLE configuracion_tags (
-  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id           UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
   tag          TEXT NOT NULL UNIQUE CHECK (char_length(trim(tag)) > 0),
   descripcion  TEXT NOT NULL,
   tipo         TEXT NOT NULL CHECK (tipo IN ('bifurcado', 'unico')),
@@ -41,7 +41,7 @@ CREATE TABLE configuracion_tags (
 -- TABLA: rutas
 -- ============================================================
 CREATE TABLE rutas (
-  id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id                    UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
   nombre                TEXT NOT NULL CHECK (char_length(trim(nombre)) > 0),
   unidad_funcional_id   UUID NOT NULL REFERENCES unidades_funcionales(id),
   carriles_tags         TEXT[] NOT NULL DEFAULT '{}',
@@ -54,7 +54,7 @@ CREATE TABLE rutas (
 -- TABLA: indicadores
 -- ============================================================
 CREATE TABLE indicadores (
-  id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id                          UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
   nombre                      TEXT NOT NULL,
   identificador               TEXT NOT NULL UNIQUE CHECK (char_length(trim(identificador)) > 0),
   concepto_medicion           TEXT NOT NULL DEFAULT '',
@@ -78,7 +78,7 @@ CREATE TABLE indicadores (
 -- TABLA: mediciones
 -- ============================================================
 CREATE TABLE mediciones (
-  id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id                      UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
   proyecto_id             UUID NOT NULL REFERENCES proyectos(id),
   unidad_funcional_id     UUID NOT NULL REFERENCES unidades_funcionales(id),
   ruta_id                 UUID NOT NULL REFERENCES rutas(id),
@@ -97,7 +97,7 @@ CREATE TABLE mediciones (
 -- TABLA: mediciones_registros_base (datos pesados, separados)
 -- ============================================================
 CREATE TABLE mediciones_registros_base (
-  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id           UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
   medicion_id  UUID NOT NULL REFERENCES mediciones(id),
   -- Un registro por medicion con estructura variable
   headers      JSONB NOT NULL DEFAULT '[]'::jsonb,
